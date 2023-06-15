@@ -1,0 +1,84 @@
+# Load required packages
+library(readr)
+library(psy)
+library(psych)
+library(lavaan)
+library(tidyverse)
+library(GPArotation)
+
+# Set split ratio
+split_ratio <- 1.0  # proportion of EFA in the EFA:CFA split of cases
+
+# Set cutoff for factor loadings
+threshold <- 0.3
+
+# Set the file path
+path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalUnattribute_DATA_2023-06-15_1326.csv"
+
+# Import data from csv
+data <- read_csv(path)
+
+# Get questionnaire variables
+questionnaire_vars <- names(data)[!(names(data) %in% "record_id")]
+
+# Remove rows with 3 or more missing values in questionnaire items
+data <- data[rowSums(is.na(data[, questionnaire_vars])) <= 2, ]
+
+# Replace missing values with column mean for rows with 2 or fewer missing values
+data <- mutate(data, across(all_of(questionnaire_vars), ~ifelse(is.na(.), mean(., na.rm = TRUE), .), .names = "{.col}"))
+
+# Split the data into two: one for EFA and one for CFA
+set.seed(123)
+data_ids <- data$record_id
+split_ids <- sample(data_ids, size = length(data_ids) * split_ratio)
+efa_data <- data[data$record_id %in% split_ids, ]
+cfa_data <- data[!(data$record_id %in% split_ids), ]
+
+# Run parallel analysis to decide number of factors
+pa <- fa.parallel(efa_data[, questionnaire_vars], fm = "minres")
+nfactors <- pa$nfact
+
+# Run EFA with oblimin rotation
+efa_model <- fa(r = efa_data[, questionnaire_vars], nfactors = nfactors, fm = "minres", rotate = "oblimin")
+
+# Print EFA model structure
+str(efa_model)
+
+# Print EFA model summary
+print(fa.diagram(efa_model))
+
+# Scree plot
+scree(cor(efa_data[, questionnaire_vars]))
+
+# Factor loadings
+print(efa_model$loadings, cutoff = threshold, sort = TRUE)
+
+# Function to remove items that load onto multiple factors above a threshold
+remove_cross_loading_items <- function(loadings_matrix, threshold) {
+  items <- row.names(loadings_matrix)
+  removed_items <- NULL
+  for (item in items) {
+    item_loadings <- loadings_matrix[item, ]
+    if (sum(item_loadings > threshold) > 1) {
+      removed_items <- rbind(removed_items, data.frame(Item = item, Loadings = as.list(item_loadings)))
+      loadings_matrix <- loadings_matrix[-which(rownames(loadings_matrix) == item),]
+    }
+  }
+  return(list(cleaned_loadings = loadings_matrix, removed_items = removed_items))
+}
+
+# Apply function to EFA model loadings
+result <- remove_cross_loading_items(efa_model$loadings, threshold)
+retained_items <- result$cleaned_loadings
+removed_items <- result$removed_items
+
+# Print names and loadings of retained and then removed items
+print(retained_items)
+print(removed_items)
+
+# Create a new data frame with only the retained items
+retained_data <- efa_data[, rownames(retained_items)]
+
+# Check number of factors after removing items using parallel analysis
+pa_check <- fa.parallel(retained_data, fm = "minres")
+nfactors_check <- pa_check$nfact
