@@ -20,7 +20,7 @@ boot_iterations <- 100 # Ensure this is 1000 for actual analysis
 threshold <- 0.3
 
 # Set the file path
-path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalUnattribute_DATA_2023-06-21_1216.csv"
+path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-07-10_1539.csv"
 
 # Import data from csv
 data <- read_csv(path)
@@ -204,7 +204,7 @@ run_factor_analysis <- function(data, nfactors) {
     print(paste("EFA failed:", e$message))
     return(NULL)
   })
-  print(fa_result)
+  #print(fa_result)
   return(fa_result)
 }
 
@@ -236,22 +236,21 @@ efa_func <- function(data, indices, nfactors, initial_efa) {
   
   unrotated_loadings_df <- as.data.frame(bootstrap_efa$loadings)
   unrotated_loadings_df$item <- colnames(data)
-  print("Iteration loadings after EFA")
-  print(unrotated_loadings_df)
+  #print("Iteration loadings after EFA")
+  #print(unrotated_loadings_df)
   
   if(nfactors == 1) {
     loadings_df <- as.data.frame(bootstrap_efa$loadings)
-    print("Iteration final loadings")
+    #print("Iteration final loadings")
   } else {
     rotated_loadings <- procrustes_rotate_loadings(bootstrap_efa, initial_efa)
     if (is.null(rotated_loadings)) return(list(rotated = NULL, unrotated = unrotated_loadings_df))
     
     loadings_df <- as.data.frame(rotated_loadings)
-    print("Iteration final loadings after Procrustes rotation")
+    #print("Iteration final loadings after Procrustes rotation")
   }
-  
   loadings_df$item <- colnames(data)
-  print(loadings_df)
+  #print(loadings_df)
   
   return(list(rotated = loadings_df, unrotated = unrotated_loadings_df))
 }
@@ -262,7 +261,7 @@ run_bootstrap_efa <- function(efa_data, questionnaire_vars, boot_iterations, nfa
   results_list_unrotated <- vector("list", boot_iterations)
   
   for (i in 1:boot_iterations) {
-    print(paste("Bootstrap EFA iteration", i))
+    #print(paste("Bootstrap EFA iteration", i))
     
     result <- efa_func(efa_data[, questionnaire_vars], sample(1:nrow(efa_data), replace = TRUE), nfactors, initial_efa)
     
@@ -276,7 +275,7 @@ run_bootstrap_efa <- function(efa_data, questionnaire_vars, boot_iterations, nfa
   return(list(rotated = results_list_rotated, unrotated = results_list_unrotated))
 }
 
-# Function returning summary data frame of bootstrap EFA results
+# Function returning summary of factor loadings from bootstrap EFA
 summarize_loadings <- function(results_list) {
   loadings_df <- do.call(rbind, results_list)
   
@@ -292,6 +291,30 @@ summarize_loadings <- function(results_list) {
   return(loadings_summary)
 }
 
+# Function returning summary of factor communalities from bootstrap EFA
+summarize_communalities <- function(loadings_list) {
+  # Use do.call() and rbind to combine the list of data frames into one data frame
+  communalities_df <- do.call(rbind, lapply(loadings_list, function(loadings) {
+    item_names <- loadings$item # Store item names separately
+    loadings <- loadings %>% select(-item) # Remove the item column from loadings data
+    communalities <- rowSums(loadings^2) # Calculate communalities
+    # Create a data frame containing item names and communalities
+    data.frame(item = item_names, communality = communalities)
+  }))
+  
+  # Summarize the communalities by calculating mean and CI
+  summarized_communalities <- communalities_df %>%
+    group_by(item) %>%
+    summarise(
+      mean = mean(communality),
+      ci_lower = quantile(communality, 0.025),
+      ci_upper = quantile(communality, 0.975),
+      .groups = "drop"
+    )
+  
+  return(summarized_communalities)
+}
+
 # Function to pivot factor loadings summary to wide format
 pivot_loadings <- function(loadings_summary) {
   loadings_summary_wide <- loadings_summary %>%
@@ -302,13 +325,13 @@ pivot_loadings <- function(loadings_summary) {
 }
 
 # Function to prepare loading summaries and print tables
-prepare_and_print_loadings <- function(loadings_summary, print_title) {
+prepare_and_print_loadings <- function(loadings_summary, title) {
   loadings_summary_wide <- pivot_loadings(loadings_summary)
   
   # Order rows on descending values within first column
   loadings_summary_wide <- loadings_summary_wide %>% arrange(desc(!!sym(names(loadings_summary_wide)[2])))
   
-  print(print_title)
+  print(title)
   print(loadings_summary_wide)
 }
 
@@ -317,16 +340,24 @@ initial_efa <- run_factor_analysis(efa_data[, questionnaire_vars], nfactors)
 if(is.null(initial_efa)){
   print("Initial EFA failed. Check your data.")
 } else {
+  print("Initial EFA:")
   print(initial_efa)
   
+  # Run boostrap EFA
   bootstrap_results <- run_bootstrap_efa(efa_data, questionnaire_vars, boot_iterations, nfactors, initial_efa)
   
+  # Print summaries
   loadings_summary_rotated <- summarize_loadings(bootstrap_results$rotated)
   loadings_summary_unrotated <- summarize_loadings(bootstrap_results$unrotated)
   
-  # Print summaries
-  prepare_and_print_loadings(loadings_summary_rotated, "Final loadings summary after Procrustes rotations")
-  prepare_and_print_loadings(loadings_summary_unrotated, "Loadings summary without Procrustes rotations")
+  prepare_and_print_loadings(loadings_summary_rotated, "Final loadings summary after Procrustes rotations:")
+  prepare_and_print_loadings(loadings_summary_unrotated, "Loadings summary without Procrustes rotations:")
+  
+  communalities_summary_rotated <- summarize_communalities(bootstrap_results$rotated)
+  communalities_summary_unrotated <- summarize_communalities(bootstrap_results$unrotated)
+  
+  print("Communalities summary after Procrustes rotations:")
+  print(communalities_summary_rotated)
+  print("Communalities summary without Procrustes rotations:")
+  print(communalities_summary_unrotated)
 }
-
-
