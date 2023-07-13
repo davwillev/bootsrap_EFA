@@ -16,6 +16,9 @@ set.seed(123)
 # Set number of bootstrap iterations
 boot_iterations <- 100 # Ensure this is 1000 for actual analysis
 
+# Minimum number of subjects per item for EFA
+min_subjects_item <- 20
+
 # Set cutoff for factor loadings
 threshold <- 0.3
 
@@ -43,7 +46,7 @@ num_subjects <- nrow(data)
 print(num_subjects)
 
 # Calculate the minimum number of subjects required per dataset (EFA and CFA)
-min_subjects <- num_vars * 20  # Minimum of 20 subjects per item for EFA
+min_subjects <- num_vars * min_subjects_item
 
 # Calculate the split ratio if/when splitting for EFA:CFA (if not splitting, set to 1.0)
 split_ratio <- min_subjects / num_subjects
@@ -109,7 +112,7 @@ boot_results_eigen <- boot(data = efa_data[, questionnaire_vars], statistic = ge
 
 # Extract the number of factors and eigenvalues from the boot_results_eigen
 boot_nfactors_eigen <- boot_results_eigen$t[, 1]  # The first element is the number of factors
-boot_eigenvalues <- boot_results_eigen$t[, -1]  # The remaining elements are the eigenvalues
+boot_eigenvalues <- boot_results_eigen$t[, -1]  # The remaining elements are eigenvalues
 
 # Calculate the mean and 95% confidence interval for each eigenvalue
 mean_eigenvalues <- colMeans(boot_eigenvalues, na.rm = TRUE)
@@ -276,23 +279,46 @@ run_bootstrap_efa <- function(efa_data, questionnaire_vars, boot_iterations, nfa
 }
 
 # Function returning summary of factor loadings from bootstrap EFA
-summarize_loadings <- function(results_list) {
-  loadings_df <- do.call(rbind, results_list)
+loadings_summary <- function(bootstrap_results, nfactors) {
+  # Create an empty list to store factor loadings for each item and factor
+  factor_loadings <- vector("list", nfactors)
+  names(factor_loadings) <- paste0("MR", 1:nfactors)
   
-  loadings_summary <- loadings_df %>%
-    gather(key = "factor", value = "loading", -item) %>%
-    group_by(item, factor) %>%
-    summarise(mean = mean(loading, na.rm = TRUE), 
-              ci_lower = quantile(loading, 0.025, na.rm = TRUE),
-              ci_upper = quantile(loading, 0.975, na.rm = TRUE),
-              .groups = 'drop') %>%
-    mutate(Mean_CI = sprintf("%.2f (%.2f, %.2f)", mean, ci_lower, ci_upper))
+  # Loop over the list of bootstrapped factor analyses
+  for(i in 1:length(bootstrap_results)) {
+    for(j in 1:nfactors) {
+      # If the first iteration, initialize a data.frame
+      if(i == 1) {
+        factor_loadings[[j]] <- data.frame(item = bootstrap_results[[i]]$item, 
+                                           loading = bootstrap_results[[i]][,j],
+                                           factor = names(factor_loadings)[j])
+      } else {
+        # If not the first iteration, bind new loadings to the existing data.frame
+        factor_loadings[[j]] <- rbind(factor_loadings[[j]], 
+                                      data.frame(item = bootstrap_results[[i]]$item, 
+                                                 loading = bootstrap_results[[i]][,j],
+                                                 factor = names(factor_loadings)[j]))
+      }
+    }
+  }
   
-  return(loadings_summary)
+  # Combine all factor loadings into one data frame
+  all_loadings <- do.call(rbind, factor_loadings)
+  
+  # Calculate the mean and 95% confidence intervals
+  results <- all_loadings %>%
+    group_by(factor, item) %>%
+    summarise(mean = mean(loading),
+              ci_lower = quantile(loading, 0.025),
+              ci_upper = quantile(loading, 0.975)) %>%
+    arrange(factor, desc(mean)) %>%
+    select(item, factor, mean, ci_lower, ci_upper)  # reorder columns
+  
+  return(results)
 }
 
 # Function returning summary of factor communalities from bootstrap EFA
-summarize_communalities <- function(loadings_list) {
+communalities_summary <- function(loadings_list) {
   # Use do.call() and rbind to combine the list of data frames into one data frame
   communalities_df <- do.call(rbind, lapply(loadings_list, function(loadings) {
     item_names <- loadings$item # Store item names separately
@@ -302,7 +328,7 @@ summarize_communalities <- function(loadings_list) {
     data.frame(item = item_names, communality = communalities)
   }))
   
-  # Summarize the communalities by calculating mean and CI
+  # Summarise communalities by calculating mean and CI
   summarized_communalities <- communalities_df %>%
     group_by(item) %>%
     summarise(
@@ -311,28 +337,22 @@ summarize_communalities <- function(loadings_list) {
       ci_upper = quantile(communality, 0.975),
       .groups = "drop"
     )
-  
   return(summarized_communalities)
 }
 
-# Function to pivot factor loadings summary to wide format
-pivot_loadings <- function(loadings_summary) {
-  loadings_summary_wide <- loadings_summary %>%
-    select(-c(mean, ci_lower, ci_upper)) %>%
-    spread(key = factor, value = Mean_CI)
+format_loadings <- function(loadings_summary) {
   
-  return(loadings_summary_wide)
-}
-
-# Function to prepare loading summaries and print tables
-prepare_and_print_loadings <- function(loadings_summary, title) {
-  loadings_summary_wide <- pivot_loadings(loadings_summary)
+  # Transform numeric values into character with specified format
+  loadings_summary <- loadings_summary %>%
+    mutate(value = paste0(round(mean, 2), " (", round(ci_lower, 2), ", ", round(ci_upper, 2), ")")) %>%
+    select(item, factor, value)
   
-  # Order rows on descending values within first column
-  loadings_summary_wide <- loadings_summary_wide %>% arrange(desc(!!sym(names(loadings_summary_wide)[2])))
+  # Use pivot_wider to spread factor values into separate columns
+  formatted_loadings <- loadings_summary %>%
+    pivot_wider(names_from = factor, values_from = value) %>%
+    arrange(item)
   
-  print(title)
-  print(loadings_summary_wide)
+  return(formatted_loadings)
 }
 
 # Run initial EFA to create factor structure
@@ -347,17 +367,73 @@ if(is.null(initial_efa)){
   bootstrap_results <- run_bootstrap_efa(efa_data, questionnaire_vars, boot_iterations, nfactors, initial_efa)
   
   # Print summaries
-  loadings_summary_rotated <- summarize_loadings(bootstrap_results$rotated)
-  loadings_summary_unrotated <- summarize_loadings(bootstrap_results$unrotated)
+  loadings_summary_rotated <- format_loadings(loadings_summary(bootstrap_results$rotated, nfactors))
+  print("Final loadings summary after Procrustes rotations:")
+  print(loadings_summary_rotated)
   
-  prepare_and_print_loadings(loadings_summary_rotated, "Final loadings summary after Procrustes rotations:")
-  prepare_and_print_loadings(loadings_summary_unrotated, "Loadings summary without Procrustes rotations:")
+  loadings_summary_unrotated <- format_loadings(loadings_summary(bootstrap_results$unrotated, nfactors))
+  print("Loadings summary without Procrustes rotations:")
+  print(loadings_summary_unrotated)
   
-  communalities_summary_rotated <- summarize_communalities(bootstrap_results$rotated)
-  communalities_summary_unrotated <- summarize_communalities(bootstrap_results$unrotated)
-  
+  communalities_summary_rotated <- communalities_summary(bootstrap_results$rotated)
   print("Communalities summary after Procrustes rotations:")
   print(communalities_summary_rotated)
+  
+  communalities_summary_unrotated <- communalities_summary(bootstrap_results$unrotated)
   print("Communalities summary without Procrustes rotations:")
   print(communalities_summary_unrotated)
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Print EFA model structure and summary
+str(efa_model)
+print(fa.diagram(efa_model))
+
+# Factor loadings
+print(efa_model$loadings, cutoff = threshold, sort = TRUE)
+
+# Function to remove items that load onto multiple factors above a threshold
+remove_cross_loading_items <- function(loadings_matrix, threshold) {
+  items <- row.names(loadings_matrix)
+  # add check that there are more than one factors in loading matrix before running function, else return '1'
+  removed_items <- NULL
+  for (item in items) {
+    item_loadings <- loadings_matrix[item, ]
+    if (sum(item_loadings > threshold) > 1) {
+      removed_items <- rbind(removed_items, data.frame(Item = item, Loadings = as.list(item_loadings)))
+      loadings_matrix <- loadings_matrix[-which(rownames(loadings_matrix) == item),]
+    }
+  }
+  return(list(cleaned_loadings = loadings_matrix, removed_items = removed_items))
+}
+
+# Apply function to EFA model loadings
+result <- remove_cross_loading_items(efa_model$loadings, threshold)
+retained_items <- result$cleaned_loadings
+removed_items <- result$removed_items
+
+# Print names and loadings of retained and then removed items
+print(retained_items)
+print(removed_items)
+
+# Create a new data frame with only the retained items
+retained_data <- efa_data[, rownames(retained_items)]
+
+
