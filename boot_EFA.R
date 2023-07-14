@@ -1,14 +1,21 @@
 # Load required packages
-library(readr)
-library(psy)
-library(psych)
-library(lavaan)
-library(tidyverse)
-library(GPArotation)
-library(rstudioapi)
 library(boot)
 library(EFA.dimensions)
 library(EFAtools)
+library(gridExtra)
+library(lavaan)
+library(psy)
+library(psych)
+library(GPArotation)
+library(readr)
+library(rstudioapi)
+library(tidyverse)
+
+# Set the file path
+path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-07-14_0928.csv"
+
+# Import data from csv
+data <- read_csv(path)
 
 # Set seed
 set.seed(123)
@@ -21,12 +28,6 @@ min_subjects_item <- 20
 
 # Set cutoff for factor loadings
 threshold <- 0.32
-
-# Set the file path
-path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-07-14_0928.csv"
-
-# Import data from csv
-data <- read_csv(path)
 
 # Get questionnaire variables (retain all variables except 'record_id')
 questionnaire_vars <- names(data)[!(names(data) %in% "record_id")]
@@ -41,30 +42,31 @@ data <- data[rowSums(is.na(data[, questionnaire_vars])) <= 2, ]
 # Replace missing values with column mean for rows (cases) with 2 or fewer missing values
 data <- mutate(data, across(all_of(questionnaire_vars), ~ifelse(is.na(.), mean(., na.rm = TRUE), .), .names = "{.col}"))
 
-# Count the number of subjects (rows)
-num_subjects <- nrow(data)
-print(num_subjects)
-
-# Calculate the minimum number of subjects required per dataset (EFA and CFA)
+# Calculate the minimum number of subjects required to run EFA
 min_subjects <- num_vars * min_subjects_item
+print(paste("The minimum number of subjects required for EFA is", min_subjects))
+
+# Count the number of subjects (rows) available
+num_subjects <- nrow(data)
+print(paste("The available number of subjects is", num_subjects))
 
 # Calculate the split ratio if/when splitting for EFA:CFA (if not splitting, set to 1.0)
 split_ratio <- min_subjects / num_subjects
-print(paste("The minimum split ratio is", split_ratio))
+print(paste("The minimum split ratio required would be", split_ratio))
 
 # Check if split ratio is less than 0.5 (assuming at least 50% of the data for EFA)
 if (split_ratio < 0.5) {
   print(paste("The split ratio has been increased from", split_ratio, "to 0.5"))
   split_ratio <- 0.5
 } else if (split_ratio > 0.8) {  # too many items for the number of subjects
-  print(paste("Too few available subjects for the number of items to spilt the data."))
+  print(paste("Too few subjects available for the number of items to spilt the data."))
   split_ratio <- 1.0
 }
 print(paste("The split ratio has been set to", split_ratio))
 
-# Split the data into two subsets: one for EFA and one for CFA
+# Use split ratio to split the data into two subsets: one for EFA and one for CFA
 data_ids <- data$record_id
-split_size <- ceiling(length(data_ids) * split_ratio) # use 'ceiling' to round up to an integer
+split_size <- ceiling(length(data_ids) * split_ratio) # round up to an integer
 split_ids <- sample(data_ids, size = split_size)
 efa_data <- data[data$record_id %in% split_ids, ]
 cfa_data <- data[!(data$record_id %in% split_ids), ]
@@ -140,22 +142,28 @@ ggplot(plot_data, aes(x = eigenvalue_index, y = mean_eigenvalue)) +
   theme_minimal()
 
 # Function to create histogram
-plot_histogram <- function(nfactors, title) {
+plot_histogram <- function(nfactors, title, label) {
   df <- data.frame(nfactors = nfactors)
   
   ggplot(df, aes(x=nfactors)) +
     geom_histogram(binwidth=1, fill="skyblue", color="black") +
-    labs(title=paste("Histogram of Bootstrapped Results (", title, ")"),
+    labs(title=paste(label, ": Bootstrapped Results (", title, ")"),
          x="Number of Factors",
          y="Frequency") +
     scale_x_continuous(breaks = seq(floor(min(df$nfactors)), ceiling(max(df$nfactors)), by = 1))  # Ensure x-axis only displays integers
 }
 
-# Plot histograms of bootstrapped results
-plot_histogram(boot_results_pa$t, "Parallel Analysis")
-plot_histogram(boot_results_cd$t, "Comparative Data")
-plot_histogram(boot_results_map$t, "Minimum Average Partial")
-plot_histogram(boot_nfactors_eigen, "Eigenvalues > 1")
+# Create plots
+p1 <- plot_histogram(boot_results_pa$t, "Parallel Analysis", "A")
+p2 <- plot_histogram(boot_results_cd$t, "Comparative Data", "B")
+p3 <- plot_histogram(boot_results_map$t, "Minimum Average Partial", "C")
+p4 <- plot_histogram(boot_nfactors_eigen, "Eigenvalues > 1", "D")
+p1
+p2
+p3
+p4
+grid <- arrangeGrob(p1, p2, p3, p4, ncol=2)
+ggsave("myplots.pdf", grid, width = 11.69, height = 8.27) # Save to PDF (A4)
 
 # Get mode (or median) of bootstrap estimates for number of factors
 nfactors_final_pa <- as.integer(names(which.max(table(boot_results_pa$t))))  # or median(boot_results_pa$t)
@@ -317,6 +325,21 @@ loadings_summary <- function(bootstrap_results, nfactors) {
   return(results)
 }
 
+format_loadings <- function(loadings_summary) {
+  
+  # Transform numeric values into character with specified format
+  loadings_summary <- loadings_summary %>%
+    mutate(value = paste0(round(mean, 2), " (", round(ci_lower, 2), ", ", round(ci_upper, 2), ")")) %>%
+    select(item, factor, value)
+  
+  # Use pivot_wider to spread factor values into separate columns
+  formatted_loadings <- loadings_summary %>%
+    pivot_wider(names_from = factor, values_from = value) %>%
+    arrange(item)
+  
+  return(formatted_loadings)
+}
+
 # Summarise factor variances
 factor_variance_summary <- function(loadings_df, nfactors) {
   
@@ -327,7 +350,6 @@ factor_variance_summary <- function(loadings_df, nfactors) {
                         SS_loadings = numeric(),
                         perc_of_variance = numeric(),
                         cum_perc = numeric())
-  
   cum_variance <- 0
   
   for (i in 1:nfactors) {
@@ -345,7 +367,6 @@ factor_variance_summary <- function(loadings_df, nfactors) {
                                          perc_of_variance = perc_of_variance,
                                          cum_perc = cum_perc))
   }
-  
   return(results)
 }
 
@@ -369,21 +390,6 @@ communalities_summary <- function(loadings_list) {
       .groups = "drop"
     )
   return(summarized_metrics)
-}
-
-format_loadings <- function(loadings_summary) {
-  
-  # Transform numeric values into character with specified format
-  loadings_summary <- loadings_summary %>%
-    mutate(value = paste0(round(mean, 2), " (", round(ci_lower, 2), ", ", round(ci_upper, 2), ")")) %>%
-    select(item, factor, value)
-  
-  # Use pivot_wider to spread factor values into separate columns
-  formatted_loadings <- loadings_summary %>%
-    pivot_wider(names_from = factor, values_from = value) %>%
-    arrange(item)
-  
-  return(formatted_loadings)
 }
 
 # Run initial EFA to create factor structure
