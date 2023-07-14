@@ -14,7 +14,7 @@ library(EFAtools)
 set.seed(123)
 
 # Set number of bootstrap iterations
-boot_iterations <- 100 # Ensure this is 1000 for actual analysis
+boot_iterations <- 1000 # Set to 1000 or more for analysis
 
 # Minimum number of subjects per item for EFA
 min_subjects_item <- 20
@@ -23,7 +23,7 @@ min_subjects_item <- 20
 threshold <- 0.3
 
 # Set the file path
-path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-07-10_1539.csv"
+path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-07-14_0928.csv"
 
 # Import data from csv
 data <- read_csv(path)
@@ -325,19 +325,18 @@ communalities_summary <- function(loadings_list) {
     loadings <- loadings %>% select(-item) # Remove the item column from loadings data
     communalities <- rowSums(loadings^2) # Calculate communalities
     # Create a data frame containing item names and communalities
-    data.frame(item = item_names, communality = communalities)
+    data.frame(item = item_names, communality = communalities, uniqueness = 1 - communalities)
   }))
   
-  # Summarise communalities by calculating mean and CI
-  summarized_communalities <- communalities_df %>%
+  # Summarise communalities and uniquenesses by calculating mean and CI
+  summarized_metrics <- communalities_df %>%
     group_by(item) %>%
     summarise(
-      mean = mean(communality),
-      ci_lower = quantile(communality, 0.025),
-      ci_upper = quantile(communality, 0.975),
+      communality = paste0(round(mean(communality), 2), " (", round(quantile(communality, 0.025), 2), ", ", round(quantile(communality, 0.975), 2), ")"),
+      uniqueness = paste0(round(mean(uniqueness), 2), " (", round(quantile(uniqueness, 0.025), 2), ", ", round(quantile(uniqueness, 0.975), 2), ")"),
       .groups = "drop"
     )
-  return(summarized_communalities)
+  return(summarized_metrics)
 }
 
 format_loadings <- function(loadings_summary) {
@@ -383,57 +382,5 @@ if(is.null(initial_efa)){
   print("Communalities summary without Procrustes rotations:")
   print(communalities_summary_unrotated)
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Print EFA model structure and summary
-str(efa_model)
-print(fa.diagram(efa_model))
-
-# Factor loadings
-print(efa_model$loadings, cutoff = threshold, sort = TRUE)
-
-# Function to remove items that load onto multiple factors above a threshold
-remove_cross_loading_items <- function(loadings_matrix, threshold) {
-  items <- row.names(loadings_matrix)
-  # add check that there are more than one factors in loading matrix before running function, else return '1'
-  removed_items <- NULL
-  for (item in items) {
-    item_loadings <- loadings_matrix[item, ]
-    if (sum(item_loadings > threshold) > 1) {
-      removed_items <- rbind(removed_items, data.frame(Item = item, Loadings = as.list(item_loadings)))
-      loadings_matrix <- loadings_matrix[-which(rownames(loadings_matrix) == item),]
-    }
-  }
-  return(list(cleaned_loadings = loadings_matrix, removed_items = removed_items))
-}
-
-# Apply function to EFA model loadings
-result <- remove_cross_loading_items(efa_model$loadings, threshold)
-retained_items <- result$cleaned_loadings
-removed_items <- result$removed_items
-
-# Print names and loadings of retained and then removed items
-print(retained_items)
-print(removed_items)
-
-# Create a new data frame with only the retained items
-retained_data <- efa_data[, rownames(retained_items)]
 
 
