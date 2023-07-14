@@ -14,13 +14,13 @@ library(EFAtools)
 set.seed(123)
 
 # Set number of bootstrap iterations
-boot_iterations <- 1000 # Set to 1000 or more for analysis
+boot_iterations <- 1000 # Set to 1000 or more
 
 # Minimum number of subjects per item for EFA
 min_subjects_item <- 20
 
 # Set cutoff for factor loadings
-threshold <- 0.3
+threshold <- 0.32
 
 # Set the file path
 path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-07-14_0928.csv"
@@ -317,6 +317,38 @@ loadings_summary <- function(bootstrap_results, nfactors) {
   return(results)
 }
 
+# Summarise factor variances
+factor_variance_summary <- function(loadings_df, nfactors) {
+  
+  total_variance <- sum(loadings_df$mean^2)
+  
+  # Create an empty dataframe to store the summary results for each factor
+  results <- data.frame(factor = character(),
+                        SS_loadings = numeric(),
+                        perc_of_variance = numeric(),
+                        cum_perc = numeric())
+  
+  cum_variance <- 0
+  
+  for (i in 1:nfactors) {
+    factor_name <- paste0("MR", i)
+    factor_loadings <- loadings_df %>%
+      filter(factor == factor_name)
+    
+    SS_loadings <- sum(factor_loadings$mean^2)
+    perc_of_variance <- (SS_loadings / total_variance) * 100
+    cum_variance <- cum_variance + SS_loadings
+    cum_perc <- (cum_variance / total_variance) * 100
+    
+    results <- rbind(results, data.frame(factor = factor_name,
+                                         SS_loadings = SS_loadings,
+                                         perc_of_variance = perc_of_variance,
+                                         cum_perc = cum_perc))
+  }
+  
+  return(results)
+}
+
 # Function returning summary of factor communalities from bootstrap EFA
 communalities_summary <- function(loadings_list) {
   # Use do.call() and rbind to combine the list of data frames into one data frame
@@ -366,21 +398,21 @@ if(is.null(initial_efa)){
   bootstrap_results <- run_bootstrap_efa(efa_data, questionnaire_vars, boot_iterations, nfactors, initial_efa)
   
   # Print summaries
-  loadings_summary_rotated <- format_loadings(loadings_summary(bootstrap_results$rotated, nfactors))
-  print("Final loadings summary after Procrustes rotations:")
-  print(loadings_summary_rotated)
-  
   loadings_summary_unrotated <- format_loadings(loadings_summary(bootstrap_results$unrotated, nfactors))
   print("Loadings summary without Procrustes rotations:")
   print(loadings_summary_unrotated)
   
+  loadings_summary_rotated <- loadings_summary(bootstrap_results$rotated, nfactors)
+  formatted_loadings_summary_rotated <- format_loadings(loadings_summary_rotated)
+  print("Final loadings summary after Procrustes rotations:")
+  print(formatted_loadings_summary_rotated)
+  
+  variance_results <- factor_variance_summary(loadings_summary_rotated, nfactors)
+  print("Explained Variance by Factors")
+  print(variance_results)
+  
   communalities_summary_rotated <- communalities_summary(bootstrap_results$rotated)
   print("Communalities summary after Procrustes rotations:")
   print(communalities_summary_rotated)
-  
-  communalities_summary_unrotated <- communalities_summary(bootstrap_results$unrotated)
-  print("Communalities summary without Procrustes rotations:")
-  print(communalities_summary_unrotated)
 }
-
 
