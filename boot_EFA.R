@@ -1,15 +1,24 @@
-# Load required packages
-library(boot)
-library(EFA.dimensions)
-library(EFAtools)
-library(gridExtra)
-library(lavaan)
-library(psy)
-library(psych)
-library(GPArotation)
-library(readr)
-library(rstudioapi)
-library(tidyverse)
+# Install and load packages
+packages <- c(
+  "boot",
+  "EFA.dimensions",
+  "EFAtools",
+  "gridExtra",
+  "lavaan",
+  "lavaanPlot",
+  "psy",
+  "psych",
+  "GPArotation",
+  "readr",
+  "rstudioapi",
+  "tidyverse")
+
+for(pkg in packages){
+  if(!require(pkg, character.only = TRUE)) {
+    install.packages(pkg)
+    library(pkg, character.only = TRUE)
+  }
+}
 
 # Set the file path
 path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-07-14_0928.csv"
@@ -21,13 +30,10 @@ data <- read_csv(path)
 set.seed(123)
 
 # Set number of bootstrap iterations
-boot_iterations <- 1000 # Set to 1000 or more
+boot_iterations <- 100 # Set to 1000 or more
 
 # Minimum number of subjects per item for EFA
 min_subjects_item <- 20
-
-# Set cutoff for factor loadings
-threshold <- 0.32
 
 # Get questionnaire variables (retain all variables except 'record_id')
 questionnaire_vars <- names(data)[!(names(data) %in% "record_id")]
@@ -179,11 +185,6 @@ print(paste("Based on the bootstrapped Eigenvalue > 1 criterion, the modal numbe
 
 # Make final decision on number of factors by asking for user input
 nfactors_input <- readline(prompt="How many factors do you want to retain for the EFA? ")
-
-
-
-
-
 
 
 
@@ -421,4 +422,134 @@ if(is.null(initial_efa)){
   print("Communalities summary after Procrustes rotations:")
   print(communalities_summary_rotated)
 }
+
+
+
+
+
+
+
+
+## Part 3: Remove items
+
+# Set cutoff for factor loadings
+loadings_threshold <- 0.32
+
+# Identify the primary factor for each item
+loadings_summary_rotated <- loadings_summary_rotated %>%
+  group_by(item) %>%
+  mutate(primary_factor = factor[which.max(mean)]) %>%
+  ungroup()
+
+# Function for weak loading
+find_weak_loading <- function(loadings_summary, loadings_threshold) {
+  weak_loading_items <- loadings_summary %>%
+    group_by(item) %>%
+    mutate(primary_factor = factor[which.max(mean)],
+           max_ci_lower_primary = max(ci_lower[factor == primary_factor])) %>%
+    ungroup() %>%
+    filter(max_ci_lower_primary <= loadings_threshold) %>%
+    distinct(item) %>%
+    pull(item)
+  
+  return(weak_loading_items)
+}
+
+# Function for cross-loading
+find_cross_loading <- function(loadings_summary, loadings_threshold) {
+  cross_loading_items <- loadings_summary %>%
+    group_by(item) %>%
+    mutate(cross_loading_count = sum(ci_lower >= loadings_threshold)) %>%
+    ungroup() %>%
+    filter(cross_loading_count > 1) %>%
+    distinct(item) %>%
+    pull(item)
+  
+  return(cross_loading_items)
+}
+
+# Identify items to remove
+weak_loading_items <- find_weak_loading(loadings_summary_rotated, loadings_threshold)
+cross_loading_items <- find_cross_loading(loadings_summary_rotated, loadings_threshold)
+
+# Print items meeting each criterion
+if(length(weak_loading_items) > 0) {
+  print(paste("The items that meet the criterion for weak loading (i.e., 95% CIs included", loadings_threshold, ") are:", paste(weak_loading_items, collapse = ", ")))
+} else {
+  print(paste("No items met the criterion for weak loading (i.e., 95% CIs did not include", loadings_threshold, ")."))
+}
+
+if(length(cross_loading_items) > 0) {
+  print(paste("The items that meet the criterion for cross-loading (i.e., 95% CIs included", loadings_threshold, " in more than one factor) are:", paste(cross_loading_items, collapse = ", ")))
+} else {
+  print(paste("No items met the criterion for cross-loading (i.e., 95% CIs did not include", loadings_threshold, " in more than one factor)."))
+}
+
+# Items that meet more than one criteria
+multiple_criteria_items <- intersect(weak_loading_items, cross_loading_items)
+if(length(multiple_criteria_items) > 0) {
+  print(paste("The items removed due to meeting more than one criteria are:", paste(both_criteria_items, collapse = ", ")))
+} else {
+  print("No items met more than one criteria.")
+}
+
+# Create final list of items to remove
+items_to_remove <- union(weak_loading_items, cross_loading_items)
+
+# Remove any items that fit criteria from CFA data
+if(length(items_to_remove) > 0) {
+  # Remove these items from the CFA dataset
+  cfa_data <- cfa_data %>%
+    select(-one_of(items_to_remove))
+  print(paste("The following items were removed from the CFA dataset:", paste(items_to_remove, collapse = ", ")))
+} else {
+  print("No items were removed from the CFA dataset.")
+}
+
+# Get remaining questionnaire variables (retain all variables except 'record_id')
+cfa_questionnaire_vars <- names(cfa_data)[!(names(cfa_data) %in% "record_id")]
+print(cfa_questionnaire_vars)
+
+
+
+
+
+## Part 4: Perform CFA
+
+# Create an empty vector to store the CFA model syntax
+cfa_model_syntax <- ""
+
+# Group items by their primary factors
+grouped_items <- loadings_summary_rotated %>%
+  filter(mean > loadings_threshold, item %in% cfa_questionnaire_vars) %>%  # Filter on cfa_questionnaire_vars
+  group_by(primary_factor) %>%
+  summarise(items = paste(item, collapse = " + "),
+            .groups = "drop")
+
+# Generate the CFA model syntax
+for(i in 1:nrow(grouped_items)) {
+  factor <- grouped_items$primary_factor[i]
+  items <- grouped_items$items[i]
+  cfa_model_syntax <- paste(cfa_model_syntax, factor, "=~", items, "\n")
+}
+
+# Print the CFA model syntax
+print(cfa_model_syntax)
+
+# Fit CFA model using lavaan
+cfa_model <- cfa(cfa_model_syntax, data = cfa_data, missing = "fiml")
+summary(cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
