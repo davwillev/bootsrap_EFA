@@ -22,6 +22,7 @@ packages <- c(
   "GPArotation",
   "readr",
   "rstudioapi",
+  "semTools",
   "tidyverse")
 
 for(pkg in packages){
@@ -36,7 +37,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 # Set the file path
-path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-07-14_0928.csv"
+path <- "/Users/davidevans/OneDrive/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-07-14_0928.csv"
 
 # Import data from csv
 data <- read_csv(path)
@@ -151,6 +152,7 @@ get_nfactors_eigen <- function(data, indices) {
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
 
 ```{r}
 
@@ -533,6 +535,7 @@ find_cross_loading <- function(loadings_summary, loadings_threshold) {
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+
 ```{r}
 
 # Identify items to remove
@@ -580,13 +583,14 @@ if(length(items_to_remove) > 0) {
 
 # Get remaining questionnaire variables (all retained variables except 'record_id')
 cfa_questionnaire_vars <- names(cfa_data)[!(names(cfa_data) %in% "record_id")]
+print("The following items will be used in the CFA:")
 print(cfa_questionnaire_vars)
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-## Part 4: Perform CFA
+## Part 4: Perform bootstrapped CFA
 
 ```{r}
 
@@ -610,11 +614,34 @@ for(i in 1:nrow(grouped_items)) {
 # Print the CFA model syntax
 print(cfa_model_syntax)
 
-# Fit CFA model using lavaan
-cfa_model <- cfa(cfa_model_syntax, data = cfa_data, missing = "fiml")
-summary(cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
-
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
+```{r}
+
+# Fit CFA model using lavaan
+cfa_model <- cfa(cfa_model_syntax, data = cfa_data, missing = "fiml")
+summary(cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
+
+# Bootstrapping the CFA model
+boot_cfa_model <- bootstrapLavaan(cfa_model, R = boot_iterations, FUN = "fitMeasures", fit.measures = "chisq")
+
+# Get summary of the bootstrapped model
+summary(boot_cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
+
+# Calculate the 2.5th and 97.5th percentiles for the 95% confidence interval
+boot_cfa_ci_lower <- quantile(boot_cfa_model, 0.025)
+boot_cfa_ci_upper <- quantile(boot_cfa_model, 0.975)
+
+print(paste0("95% Confidence interval for the chi-square statistic: [", boot_cfa_ci_lower, ", ", boot_cfa_ci_upper, "]"))
+
+# Get the test statistic for the original sample
+T_orig <- fitMeasures(cfa_model, "chisq")
+
+# Compute a bootstrap based p-value
+pvalue_boot <- length(which(boot_cfa_model > T_orig))/length(boot_cfa_model)
+print(paste0("Bootstrap p-value: ", pvalue_boot))
+
+knitr::opts_chunk$set(echo = TRUE)
+```
