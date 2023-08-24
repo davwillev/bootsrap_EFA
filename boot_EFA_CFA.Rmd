@@ -625,23 +625,40 @@ cfa_model <- cfa(cfa_model_syntax, data = cfa_data, missing = "fiml")
 summary(cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
 
 # Bootstrapping the CFA model
-boot_cfa_model <- bootstrapLavaan(cfa_model, R = boot_iterations, FUN = "fitMeasures", fit.measures = "chisq")
+boot_cfa_model <- bootstrapLavaan(cfa_model, R = boot_iterations, FUN = "fitMeasures", fit.measures = c("chisq", "cfi", "tli", "rmsea", "srmr"))
+
+# Extract the bootstrapped distributions for each measure
+boot_chisq <- boot_cfa_model[, "chisq"]
+boot_cfi <- boot_cfa_model[, "cfi"]
+boot_tli <- boot_cfa_model[, "tli"]
+boot_rmsea <- boot_cfa_model[, "rmsea"]
+boot_srmr <- boot_cfa_model[, "srmr"]
+
+# Helper function to calculate and print 95% CI for bootstrapped fit measures
+compute_ci <- function(boot_values, measure_name) {
+  ci_lower <- quantile(boot_values, 0.025)
+  ci_upper <- quantile(boot_values, 0.975)
+  print(paste0("95% CI for ", measure_name, ": [", ci_lower, ", ", ci_upper, "]"))
+  return(c(ci_lower, ci_upper))
+}
+
+# Calculate and print the 2.5th and 97.5th percentiles for the 95% confidence interval for each measure
+ci_chisq <- compute_ci(boot_chisq, "Chi-Square")
+ci_cfi <- compute_ci(boot_cfi, "CFI")
+ci_tli <- compute_ci(boot_tli, "TLI")
+ci_rmsea <- compute_ci(boot_rmsea, "RMSEA")
+ci_srmr <- compute_ci(boot_srmr, "SRMR")
 
 # Get summary of the bootstrapped model
 summary(boot_cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
 
-# Calculate the 2.5th and 97.5th percentiles for the 95% confidence interval
-boot_cfa_ci_lower <- quantile(boot_cfa_model, 0.025)
-boot_cfa_ci_upper <- quantile(boot_cfa_model, 0.975)
-
-print(paste0("95% Confidence interval for the chi-square statistic: [", boot_cfa_ci_lower, ", ", boot_cfa_ci_upper, "]"))
-
 # Get the test statistic for the original sample
 T_orig <- fitMeasures(cfa_model, "chisq")
+print(T_orig)
 
-# Compute a bootstrap based p-value
+# Compute a bootstrap based p-value for chi-square
 pvalue_boot <- length(which(boot_cfa_model > T_orig))/length(boot_cfa_model)
-print(paste0("Bootstrap p-value: ", pvalue_boot))
+print(paste0("Bootstrap chi-square p-value: ", pvalue_boot))
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
