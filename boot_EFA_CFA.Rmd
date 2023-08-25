@@ -5,7 +5,6 @@ date: "`r Sys.Date()`"
 output: html_document
 ---
 
-
 ## Install and load packages
 
 ```{r, eval=FALSE}
@@ -14,6 +13,7 @@ packages <- c(
   "boot",
   "EFA.dimensions",
   "EFAtools",
+  "grid",
   "gridExtra",
   "lavaan",
   "lavaanPlot",
@@ -37,7 +37,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 # Set the file path
-path <- "/Users/davidevans/OneDrive/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-07-14_0928.csv"
+path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-08-21_2324.csv"
 
 # Import data from csv
 data <- read_csv(path)
@@ -69,11 +69,21 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 
+# Summary of missing data before cleaning
+total_missing_values <- sum(is.na(data[, questionnaire_vars]))
+print(paste("Total missing values before cleaning:", total_missing_values))
+
 # Remove rows (cases) with more than 2 missing values in questionnaire items
+# This threshold is chosen based on [rationale/research decision]
 data <- data[rowSums(is.na(data[, questionnaire_vars])) <= 2, ]
 
-# Replace missing values with column mean for rows (cases) with 2 or fewer missing values
+# Impute missing values using column means
+# Note: This method assumes data is MCAR. Consider other methods if not the case.
 data <- mutate(data, across(all_of(questionnaire_vars), ~ifelse(is.na(.), mean(., na.rm = TRUE), .), .names = "{.col}"))
+
+# Descriptive statistics after cleaning
+summary_data <- summary(data[, questionnaire_vars])
+print(head(summary_data))
 
 # Calculate the minimum number of subjects required to run EFA
 min_subjects <- num_vars * min_subjects_item
@@ -93,12 +103,16 @@ knitr::opts_chunk$set(echo = TRUE)
 split_ratio <- min_subjects / num_subjects
 print(paste("The minimum split ratio required would be", split_ratio))
 
-# Check if split ratio is less than 0.5 (assuming at least 50% of the data for EFA)
-if (split_ratio < 0.5) {
-  print(paste("The split ratio has been increased from", split_ratio, "to 0.5"))
-  split_ratio <- 0.5
-} else if (split_ratio > 0.8) {  # too many items for the number of subjects
-  print(paste("Too few subjects available for the number of items to spilt the data."))
+# Define split ratio thresholds for clarity and adjustability
+lower_threshold <- 0.5
+upper_threshold <- 0.8
+
+# Adjust split ratio based on thresholds
+if (split_ratio < lower_threshold) {
+  print(paste("The split ratio has been increased from", split_ratio, "to", lower_threshold))
+  split_ratio <- lower_threshold
+} else if (split_ratio > upper_threshold) {  
+  print(paste("Too few subjects available for the number of items to split the data."))
   split_ratio <- 1.0
 }
 print(paste("The split ratio has been set to", split_ratio))
@@ -109,6 +123,10 @@ split_size <- ceiling(length(data_ids) * split_ratio) # round up to an integer
 split_ids <- sample(data_ids, size = split_size)
 efa_data <- data[data$record_id %in% split_ids, ]
 cfa_data <- data[!(data$record_id %in% split_ids), ]
+
+# Print sizes of subsets
+print(paste("Number of subjects in EFA data:", nrow(efa_data)))
+print(paste("Number of subjects in CFA data:", nrow(cfa_data)))
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -178,12 +196,19 @@ plot_data <- data.frame(
   ci_upper = ci_eigenvalues[2, ]
 )
 
-# Create a scree plot with 95% confidence intervals
-df <- data.frame(nfactors = boot_nfactors_eigen)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Create plots for factor extraction
+
+```{r}
+
+# Create a scree plot with 95% confidence intervals and a horizontal line at eigenvalue = 1
 ggplot(plot_data, aes(x = eigenvalue_index, y = mean_eigenvalue)) +
   geom_line() +
   geom_point() +
   geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2) +
+  geom_hline(yintercept = 1, linetype="dashed", color = "red") +  # Add a horizontal line at eigenvalue = 1
   labs(
     title = "Scree Plot with Bootstrap Eigenvalues",
     x = "Eigenvalue Index",
@@ -191,18 +216,14 @@ ggplot(plot_data, aes(x = eigenvalue_index, y = mean_eigenvalue)) +
   ) +
   theme_minimal()
 
-knitr::opts_chunk$set(echo = TRUE)
-```
-
-
-```{r}
-
-# Function to create histogram
+# Function to create histogram with mode indicated
 plot_histogram <- function(nfactors, title, label) {
   df <- data.frame(nfactors = nfactors)
+  mode_value <- as.numeric(names(sort(table(df$nfactors), decreasing = TRUE)[1]))  # Calculate mode
   
   ggplot(df, aes(x=nfactors)) +
     geom_histogram(binwidth=1, fill="skyblue", color="black") +
+    geom_vline(aes(xintercept = mode_value), linetype="dashed", color = "red") +  # Add a vertical line at mode
     labs(title=paste(label, ": Bootstrapped Results (", title, ")"),
          x="Number of Factors",
          y="Frequency") +
@@ -214,11 +235,10 @@ p1 <- plot_histogram(boot_results_pa$t, "Parallel Analysis", "A")
 p2 <- plot_histogram(boot_results_cd$t, "Comparative Data", "B")
 p3 <- plot_histogram(boot_results_map$t, "Minimum Average Partial", "C")
 p4 <- plot_histogram(boot_nfactors_eigen, "Eigenvalues > 1", "D")
-p1
-p2
-p3
-p4
+
 grid <- arrangeGrob(p1, p2, p3, p4, ncol=2)
+grid.draw(grid)
+
 ggsave("myplots.pdf", grid, width = 11.69, height = 8.27) # Save to PDF (A4)
 
 knitr::opts_chunk$set(echo = TRUE)
@@ -441,10 +461,11 @@ communalities_summary <- function(loadings_list) {
     data.frame(item = item_names, communality = communalities, uniqueness = 1 - communalities)
   }))
   
-  # Summarise communalities and uniquenesses by calculating mean and CI
+  # Summarise communalities and uniquenesses by calculating mean, CI, and adding mean communalities as a separate column
   summarized_metrics <- communalities_df %>%
     group_by(item) %>%
     summarise(
+      mean_communality = round(mean(communality), 2),
       communality = paste0(round(mean(communality), 2), " (", round(quantile(communality, 0.025), 2), ", ", round(quantile(communality, 0.975), 2), ")"),
       uniqueness = paste0(round(mean(uniqueness), 2), " (", round(quantile(uniqueness, 0.025), 2), ", ", round(quantile(uniqueness, 0.975), 2), ")"),
       .groups = "drop"
@@ -466,7 +487,10 @@ if(is.null(initial_efa)){
   print("Initial EFA:")
   print(initial_efa)
   
-  # Run boostrap EFA
+  # Interpretation: 
+  # Ideally, the initial EFA should provide insights into the factor structure. Check if specific items load strongly onto particular factors.
+  
+  # Run bootstrap EFA
   bootstrap_results <- run_bootstrap_efa(efa_data, questionnaire_vars, boot_iterations, nfactors, initial_efa)
   
   # Print summaries
@@ -474,19 +498,72 @@ if(is.null(initial_efa)){
   print("Loadings summary without Procrustes rotations:")
   print(loadings_summary_unrotated)
   
+  # Interpretation: 
+  # Examine the loadings to see which items consistently load onto specific factors. Items with loadings close to 0 may not fit well with any factor.
+  
   loadings_summary_rotated <- loadings_summary(bootstrap_results$rotated, nfactors)
   formatted_loadings_summary_rotated <- format_loadings(loadings_summary_rotated)
   print("Final loadings summary after Procrustes rotations:")
   print(formatted_loadings_summary_rotated)
   
+  # Interpretation:
+  # Procrustes rotations help align the loadings of bootstrap EFAs with the initial EFA. Check if the rotated loadings offer clearer insights into the factor structure.
+  
   variance_results <- factor_variance_summary(loadings_summary_rotated, nfactors)
   print("Explained Variance by Factors")
   print(variance_results)
   
+  # Interpretation:
+  # Factors that explain a higher proportion of the variance are generally more significant. Factors explaining very little variance may be less informative or redundant.
+  
   communalities_summary_rotated <- communalities_summary(bootstrap_results$rotated)
   print("Communalities summary after Procrustes rotations:")
   print(communalities_summary_rotated)
+  
+  # Interpretation:
+  # Communalities reflect how well each item is represented by the factors. Items with low communalities might not fit well with the chosen factor structure.
 }
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+# Convert the loading matrix to long format for heatmap
+heatmap_data <- loadings_summary_rotated %>%
+  pivot_wider(names_from = factor, values_from = mean, id_cols = item)
+
+# Create a function to generate the heatmap for a given factor
+plot_heatmap <- function(factor_name) {
+  ggplot(heatmap_data, aes(x = factor, y = item)) + 
+    geom_tile(aes_string(fill = factor_name), color = "white") +  # Use aes_string to dynamically use the column name
+    scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0) +
+    theme_minimal() +
+    labs(title = paste("Heatmap of Factor Loadings -", factor_name), 
+         x = "Factors", y = "Items", fill = "Loading")
+}
+
+# Create a list of factor names
+factor_names <- paste0("MR", 1:nfactors)
+
+factor_names %>%
+  purrr::map(plot_heatmap) %>%
+  gridExtra::grid.arrange(grobs = ., ncol = nfactors)
+
+# Bar Chart for Variance Explained
+ggplot(variance_results, aes(x=factor, y=perc_of_variance)) +
+  geom_bar(stat="identity", fill="steelblue") +
+  theme_minimal() +
+  labs(title="Variance Explained by Each Factor", x="Factor", y="Variance Explained (%)")
+
+# Obtain summarized metrics with mean communalities
+communalities_summary_rotated_modified <- communalities_summary(bootstrap_results$rotated)
+
+# Histogram of Communalities
+ggplot(communalities_summary_rotated_modified, aes(x=mean_communality)) +
+  geom_histogram(fill="skyblue", color="black", binwidth=0.05) +
+  theme_minimal() +
+  labs(title="Histogram of Mean Communalities", x="Communality", y="Frequency")
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -505,30 +582,39 @@ loadings_summary_rotated <- loadings_summary_rotated %>%
   mutate(primary_factor = factor[which.max(mean)]) %>%
   ungroup()
 
-# Function for weak loading
+# Function to identify items with weak loadings
 find_weak_loading <- function(loadings_summary, loadings_threshold) {
+  # Group by item and identify the primary factor for each item
+  # Compute the lower bound of the confidence interval for the primary factor
   weak_loading_items <- loadings_summary %>%
     group_by(item) %>%
     mutate(primary_factor = factor[which.max(mean)],
            max_ci_lower_primary = max(ci_lower[factor == primary_factor])) %>%
     ungroup() %>%
+    # Filter items where the primary factor's CI lower bound is below the threshold
     filter(max_ci_lower_primary <= loadings_threshold) %>%
+    # Extract unique items
     distinct(item) %>%
     pull(item)
   
+  # Return a list of items with weak loadings
   return(weak_loading_items)
 }
 
-# Function for cross-loading
+# Function to identify items with cross-loadings
 find_cross_loading <- function(loadings_summary, loadings_threshold) {
+  # Group by item and count the number of factors where the CI lower bound is above the threshold
   cross_loading_items <- loadings_summary %>%
     group_by(item) %>%
     mutate(cross_loading_count = sum(ci_lower >= loadings_threshold)) %>%
     ungroup() %>%
+    # Filter items that load onto more than one factor based on the CI lower bound threshold
     filter(cross_loading_count > 1) %>%
+    # Extract unique items
     distinct(item) %>%
     pull(item)
   
+  # Return a list of items with cross-loadings
   return(cross_loading_items)
 }
 
@@ -558,7 +644,7 @@ if(length(cross_loading_items) > 0) {
 # Items that meet more than one criteria
 multiple_criteria_items <- intersect(weak_loading_items, cross_loading_items)
 if(length(multiple_criteria_items) > 0) {
-  print(paste("The items removed due to meeting more than one criteria are:", paste(both_criteria_items, collapse = ", ")))
+  print(paste("The items removed due to meeting more than one criteria are:", paste(multiple_criteria_items, collapse = ", ")))
 } else {
   print("No items met more than one criteria.")
 }
