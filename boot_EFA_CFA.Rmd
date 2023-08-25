@@ -17,6 +17,7 @@ packages <- c(
   "gridExtra",
   "lavaan",
   "lavaanPlot",
+  "mice",
   "psy",
   "psych",
   "GPArotation",
@@ -706,46 +707,74 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 
-# Fit CFA model using lavaan
-cfa_model <- cfa(cfa_model_syntax, data = cfa_data, missing = "fiml")
-summary(cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
+# Define the number of imputed datasets
+num_imputed_datasets <- 50  
 
-# Bootstrapping the CFA model
-boot_cfa_model <- bootstrapLavaan(cfa_model, R = boot_iterations, FUN = "fitMeasures", fit.measures = c("chisq", "cfi", "tli", "rmsea", "srmr"))
+# Impute the missing data
+mice_cfa_data <- mice(cfa_data, m = num_imputed_datasets)
 
-# Extract the bootstrapped distributions for each measure
-boot_chisq <- boot_cfa_model[, "chisq"]
-boot_cfi <- boot_cfa_model[, "cfi"]
-boot_tli <- boot_cfa_model[, "tli"]
-boot_rmsea <- boot_cfa_model[, "rmsea"]
-boot_srmr <- boot_cfa_model[, "srmr"]
+# Lists to store results for each imputed dataset
+results_list <- list()
 
-# Helper function to calculate and print 95% CI for bootstrapped fit measures
-compute_ci <- function(boot_values, measure_name = NULL) {
-  ci_lower <- quantile(boot_values, 0.025, na.rm = TRUE)
-  ci_upper <- quantile(boot_values, 0.975, na.rm = TRUE)
-  if (!is.null(measure_name)) {
-    print(paste0("95% CI for ", measure_name, ": [", ci_lower, ", ", ci_upper, "]"))
-  }
-  return(c(ci_lower, ci_upper))
+# Iterate over each imputed dataset
+for(i in 1:num_imputed_datasets) {
+  # Extract the ith imputed dataset
+  dataset <- complete(mice_cfa_data, action = i)
+  
+  # Fit CFA model on the imputed dataset
+  cfa_model_i <- cfa(cfa_model_syntax, data = dataset)
+  
+  # Bootstrapping the CFA model using the imputed dataset
+  boot_cfa_model_i <- bootstrapLavaan(cfa_model_i, R = boot_iterations, type="bollen.stine", FUN = "fitMeasures", fit.measures = c("chisq", "cfi", "tli", "rmsea", "srmr"))
+  
+  # Extract the bootstrapped distributions for each measure
+  boot_chisq_i <- boot_cfa_model_i[, "chisq"]
+  boot_cfi_i <- boot_cfa_model_i[, "cfi"]
+  boot_tli_i <- boot_cfa_model_i[, "tli"]
+  boot_rmsea_i <- boot_cfa_model_i[, "rmsea"]
+  boot_srmr_i <- boot_cfa_model_i[, "srmr"]
+  
+  # Store results in the list
+  results_list[[i]] <- list(boot_chisq = boot_chisq_i,
+                            boot_cfi = boot_cfi_i,
+                            boot_tli = boot_tli_i,
+                            boot_rmsea = boot_rmsea_i,
+                            boot_srmr = boot_srmr_i)
 }
 
-# Calculate and print the 2.5th and 97.5th percentiles for the 95% confidence interval for each measure
-ci_chisq <- compute_ci(boot_chisq, "Chi-Square")
-ci_cfi <- compute_ci(boot_cfi, "CFI")
-ci_tli <- compute_ci(boot_tli, "TLI")
-ci_rmsea <- compute_ci(boot_rmsea, "RMSEA")
-ci_srmr <- compute_ci(boot_srmr, "SRMR")
+# Pooling and summarizing results
+boot_chisq_pooled <- do.call(c, lapply(results_list, function(x) x$boot_chisq))
+boot_cfi_pooled <- do.call(c, lapply(results_list, function(x) x$boot_cfi))
+boot_tli_pooled <- do.call(c, lapply(results_list, function(x) x$boot_tli))
+boot_rmsea_pooled <- do.call(c, lapply(results_list, function(x) x$boot_rmsea))
+boot_srmr_pooled <- do.call(c, lapply(results_list, function(x) x$boot_srmr))
 
-# Get summary of the bootstrapped model
-summary(boot_cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
+# Calculate bootstrapped estimates (mean or median)
+estimate_chisq <- mean(boot_chisq_pooled, na.rm = TRUE)
+estimate_cfi <- mean(boot_cfi_pooled, na.rm = TRUE)
+estimate_tli <- mean(boot_tli_pooled, na.rm = TRUE)
+estimate_rmsea <- mean(boot_rmsea_pooled, na.rm = TRUE)
+estimate_srmr <- mean(boot_srmr_pooled, na.rm = TRUE)
 
-# Get the test statistic for the original sample
-T_orig <- fitMeasures(cfa_model, "chisq")
-print(T_orig)
+# Print bootstrapped estimates with their 95% CIs
+print(paste0("Bootstrapped estimate for Chi-Square: ", estimate_chisq))
+ci_chisq <- compute_ci(boot_chisq_pooled, "Chi-Square")
+
+print(paste0("Bootstrapped estimate for CFI: ", estimate_cfi))
+ci_cfi <- compute_ci(boot_cfi_pooled, "CFI")
+
+print(paste0("Bootstrapped estimate for TLI: ", estimate_tli))
+ci_tli <- compute_ci(boot_tli_pooled, "TLI")
+
+print(paste0("Bootstrapped estimate for RMSEA: ", estimate_rmsea))
+ci_rmsea <- compute_ci(boot_rmsea_pooled, "RMSEA")
+
+print(paste0("Bootstrapped estimate for SRMR: ", estimate_srmr))
+ci_srmr <- compute_ci(boot_srmr_pooled, "SRMR")
 
 # Compute a bootstrap based p-value for chi-square
-pvalue_boot <- length(which(boot_chisq > T_orig)) / length(boot_chisq)
+T_orig <- fitMeasures(cfa_model_i, "chisq")
+pvalue_boot <- length(which(boot_chisq_pooled > T_orig)) / length(boot_chisq_pooled)
 print(paste0("Bootstrap chi-square p-value: ", pvalue_boot))
 
 knitr::opts_chunk$set(echo = TRUE)
