@@ -186,7 +186,7 @@ boot_eigenvalues <- boot_results_eigen$t[, -1]  # The remaining elements are eig
 
 # Calculate the mean and 95% confidence interval for each eigenvalue
 mean_eigenvalues <- colMeans(boot_eigenvalues, na.rm = TRUE)
-ci_eigenvalues <- apply(boot_eigenvalues, 2, function(x) quantile(x, probs = c(0.025, 0.975), na.rm = TRUE))
+ci_eigenvalues <- apply(boot_eigenvalues, 2, compute_ci)
 
 # Create a data frame for plotting
 plot_data <- data.frame(
@@ -721,10 +721,12 @@ boot_rmsea <- boot_cfa_model[, "rmsea"]
 boot_srmr <- boot_cfa_model[, "srmr"]
 
 # Helper function to calculate and print 95% CI for bootstrapped fit measures
-compute_ci <- function(boot_values, measure_name) {
-  ci_lower <- quantile(boot_values, 0.025)
-  ci_upper <- quantile(boot_values, 0.975)
-  print(paste0("95% CI for ", measure_name, ": [", ci_lower, ", ", ci_upper, "]"))
+compute_ci <- function(boot_values, measure_name = NULL) {
+  ci_lower <- quantile(boot_values, 0.025, na.rm = TRUE)
+  ci_upper <- quantile(boot_values, 0.975, na.rm = TRUE)
+  if (!is.null(measure_name)) {
+    print(paste0("95% CI for ", measure_name, ": [", ci_lower, ", ", ci_upper, "]"))
+  }
   return(c(ci_lower, ci_upper))
 }
 
