@@ -743,7 +743,7 @@ T_orig <- fitMeasures(cfa_model, "chisq")
 print(T_orig)
 
 # Compute a bootstrap based p-value for chi-square
-pvalue_boot <- length(which(boot_cfa_model > T_orig))/length(boot_cfa_model)
+pvalue_boot <- length(which(boot_chisq > T_orig)) / length(boot_chisq)
 print(paste0("Bootstrap chi-square p-value: ", pvalue_boot))
 
 knitr::opts_chunk$set(echo = TRUE)
