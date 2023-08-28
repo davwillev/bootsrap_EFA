@@ -17,13 +17,14 @@ packages <- c(
   "gridExtra",
   "lavaan",
   "lavaanPlot",
+  "naniar",
   "psy",
   "psych",
   "GPArotation",
   "readr",
-  "rstudioapi",
   "semTools",
-  "tidyverse")
+  "tidyverse",
+  "VIM")
 
 for(pkg in packages){
   if(!require(pkg, character.only = TRUE)) {
@@ -34,6 +35,7 @@ for(pkg in packages){
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
 
 ```{r}
 # Set the file path
@@ -70,37 +72,84 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 
-# Summary of missing data before cleaning
-total_missing_values <- sum(is.na(data[, questionnaire_vars]))
-print(paste("Total missing values before cleaning:", total_missing_values))
+# Function to calculate missing values
+calc_missing_values <- function(dataset, vars) {
+  sum(is.na(dataset[, vars]))
+}
 
-# Remove rows (cases) with more than 2 missing values in questionnaire items
-# This threshold is chosen based on [rationale/research decision]
-data <- data[rowSums(is.na(data[, questionnaire_vars])) <= 2, ]
+# Initial count of rows
+initial_row_count <- nrow(data)
+cat("Total number of rows at the beginning:", initial_row_count, "\n")
 
-# Impute missing values using column means
-# Note: This method assumes data is MCAR. Consider other methods if not the case.
-data <- mutate(data, across(all_of(questionnaire_vars), ~ifelse(is.na(.), mean(., na.rm = TRUE), .), .names = "{.col}"))
+# Initial count of missing values
+total_missing_values <- calc_missing_values(data, questionnaire_vars)
+cat("Total missing values before cleaning:", total_missing_values, "\n")
 
-# Descriptive statistics after cleaning
-cleaned_missing_values <- sum(is.na(data[, questionnaire_vars]))
-print(paste("Total missing values after cleaning:", cleaned_missing_values))
-summary_data <- summary(data[, questionnaire_vars])
-print(head(summary_data))
+# Count rows where all questionnaire items are NA
+all_missing_rows <- sum(rowSums(is.na(data[, questionnaire_vars])) == length(questionnaire_vars))
+cat("Number of rows with all item values missing:", all_missing_rows, "\n")
 
-# Calculate the minimum number of subjects required to run EFA
-min_subjects <- num_vars * min_subjects_item
-print(paste("The minimum number of subjects required for EFA is", min_subjects))
+# Remove rows where all questionnaire items are NA
+data <- data %>%
+  filter(rowSums(is.na(.[, questionnaire_vars])) < length(questionnaire_vars))
 
-# Count the number of subjects (rows) available
-num_subjects <- nrow(data)
-print(paste("The available number of subjects is", num_subjects))
+# Count the number of remaining rows after removing those with all questionnaire items missing
+remaining_rows_after_all_na_removal <- nrow(data)
+cat("Number of rows after removing those with all questionnaire items missing:", remaining_rows_after_all_na_removal, "\n")
+
+# Perform Little's Missing Completely At Random test
+mcar_result <- naniar::mcar_test(data[, questionnaire_vars])
+mcar_statistic <- mcar_result$statistic
+mcar_df <- mcar_result$df
+mcar_p_value <- mcar_result$p.value
+missing_patterns <- mcar_result$missing.patterns
+mcar_statement <- sprintf("Little's MCAR test yielded a chi-squared statistic of %.2f with %d degrees of freedom, resulting in a p-value of %.3f. The data contains %d unique missing data patterns.", 
+                            mcar_statistic, mcar_df, mcar_p_value, missing_patterns)
+
+print(mcar_statement)
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Impute missing values
+
+```{r}
+
+# Count rows with at least one NA item
+some_missing_rows <- sum(rowSums(is.na(data[, questionnaire_vars])) > 0)
+cat("Number of rows with one or more item values missing:", some_missing_rows, "\n")
+
+# Perform k-NN imputation on the subset of data
+imputed_data <- kNN(data[, questionnaire_vars]) # Default k=5, but adjust as needed
+
+# For each variable, replace only the values that were imputed
+for (var in questionnaire_vars) {
+  imp_col_name <- paste0(var, "_imp")
+  # Identify the indices of the values that were imputed
+  imputed_indices <- which(imputed_data[[imp_col_name]] == TRUE)
+  # Replace only the values that were imputed in the main dataset
+  data[imputed_indices, var] <- imputed_data[imputed_indices, var]
+}
+
+# Descriptive statistics after imputation
+cleaned_missing_values <- calc_missing_values(data, questionnaire_vars)
+cat("Total missing values after cleaning:", cleaned_missing_values, "\n")
+cat("Descriptive statistics of cleaned data:\n")
+print(head(summary(data[, questionnaire_vars])))
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
 ```{r}
+
+# Calculate the minimum number of subjects required to run EFA
+min_subjects <- num_vars * min_subjects_item
+cat("The minimum number of subjects required for EFA is:", min_subjects, "\n")
+
+# Count the number of subjects (rows) available
+num_subjects <- nrow(data)
+cat("The available number of subjects is:", num_subjects, "\n")
 
 # Calculate the split ratio if/when splitting for EFA:CFA (if not splitting, set to 1.0)
 split_ratio <- min_subjects / num_subjects
@@ -133,6 +182,7 @@ print(paste("Number of subjects in CFA data:", nrow(cfa_data)))
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
 
 ```{r}
 
@@ -171,6 +221,14 @@ get_nfactors_eigen <- function(data, indices) {
   return(c(nfactors_eigen, eigenvalues))  # Return a vector
 }
 
+# Helper function to calculate and print 95% CI for bootstrapped fit measures
+compute_ci <- function(boot_values, measure_name = NULL) {
+  ci_lower <- quantile(boot_values, 0.025)
+  ci_upper <- quantile(boot_values, 0.975)
+  print(paste0("95% CI for ", measure_name, ": [", ci_lower, ", ", ci_upper, "]"))
+  return(c(ci_lower, ci_upper))
+}
+
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
@@ -189,7 +247,7 @@ boot_eigenvalues <- boot_results_eigen$t[, -1]  # The remaining elements are eig
 
 # Calculate the mean and 95% confidence interval for each eigenvalue
 mean_eigenvalues <- colMeans(boot_eigenvalues, na.rm = TRUE)
-ci_eigenvalues <- apply(boot_eigenvalues, 2, function(x) quantile(x, probs = c(0.025, 0.975), na.rm = TRUE))
+ci_eigenvalues <- apply(boot_eigenvalues, 2, compute_ci)
 
 # Create a data frame for plotting
 plot_data <- data.frame(
@@ -724,14 +782,6 @@ boot_tli <- boot_cfa_model[, "tli"]
 boot_rmsea <- boot_cfa_model[, "rmsea"]
 boot_srmr <- boot_cfa_model[, "srmr"]
 
-# Helper function to calculate and print 95% CI for bootstrapped fit measures
-compute_ci <- function(boot_values, measure_name) {
-  ci_lower <- quantile(boot_values, 0.025)
-  ci_upper <- quantile(boot_values, 0.975)
-  print(paste0("95% CI for ", measure_name, ": [", ci_lower, ", ", ci_upper, "]"))
-  return(c(ci_lower, ci_upper))
-}
-
 # Calculate and print the 2.5th and 97.5th percentiles for the 95% confidence interval for each measure
 ci_chisq <- compute_ci(boot_chisq, "Chi-Square")
 ci_cfi <- compute_ci(boot_cfi, "CFI")
@@ -768,7 +818,8 @@ print(cfa_full_model_syntax)
 full_cfa_model <- cfa(cfa_full_model_syntax, data = cfa_data, missing = "fiml")
 
 # Compute bootstrap LRT p-value to compare the models
-pvalue_LRT <- bootstrapLRT(h0 = cfa_model, h1 = full_cfa_model, R = boot_iterations)
+# pvalue_LRT <- bootstrapLRT(h0 = cfa_model, h1 = full_cfa_model, R = boot_iterations)
+pvalue_LRT <- bootstrapLRT(h0 = full_cfa_model, h1 = cfa_model, R = boot_iterations, type = "nonparametric")
 
 # Print the bootstrap LRT p-value
 print(paste0("Bootstrap LRT chi-square p-value: ", pvalue_LRT))
