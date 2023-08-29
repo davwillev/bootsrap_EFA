@@ -79,7 +79,7 @@ calc_missing_values <- function(dataset, vars) {
 
 # Initial count of rows
 initial_row_count <- nrow(data)
-cat("Total number of rows at the beginning:", initial_row_count, "\n")
+cat("Total number of rows at beginning:", initial_row_count, "\n")
 
 # Initial count of missing values
 total_missing_values <- calc_missing_values(data, questionnaire_vars)
@@ -87,15 +87,15 @@ cat("Total missing values before cleaning:", total_missing_values, "\n")
 
 # Count rows where all questionnaire items are NA
 all_missing_rows <- sum(rowSums(is.na(data[, questionnaire_vars])) == length(questionnaire_vars))
-cat("Number of rows with all item values missing:", all_missing_rows, "\n")
+cat("Number of rows with all values missing:", all_missing_rows, "\n")
 
-# Remove rows where all questionnaire items are NA
+# Remove rows in which all values are NA
 data <- data %>%
   filter(rowSums(is.na(.[, questionnaire_vars])) < length(questionnaire_vars))
 
-# Count the number of remaining rows after removing those with all questionnaire items missing
+# Count the number of remaining rows after removing those with all items missing
 remaining_rows_after_all_na_removal <- nrow(data)
-cat("Number of rows after removing those with all questionnaire items missing:", remaining_rows_after_all_na_removal, "\n")
+cat("Number of rows after removing those with all values missing:", remaining_rows_after_all_na_removal, "\n")
 
 # Perform Little's Missing Completely At Random test
 mcar_result <- naniar::mcar_test(data[, questionnaire_vars])
@@ -115,25 +115,25 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 
-# Count rows with at least one NA item
+# Count rows with at least one NA value
 any_missing_rows <- sum(rowSums(is.na(data[, questionnaire_vars])) > 0)
-cat("Number of rows with one or more item values missing:", any_missing_rows, "\n")
+cat("Number of rows with one or more values missing:", any_missing_rows, "\n")
 
-# Perform k-NN imputation on the subset of data
+# Perform k-NN imputation on remaining data
 knn_imputed_data <- kNN(data[, questionnaire_vars]) # Default k=5, but adjust as needed
 
-# For each variable, replace only the values that were imputed
+# For each variable, replace NAs with imputed values
 for (var in questionnaire_vars) {
   imp_col_name <- paste0(var, "_imp")
-  # Identify the indices of the values that were imputed
+  # Identify indices of values that were imputed
   imputed_indices <- which(knn_imputed_data[[imp_col_name]] == TRUE)
-  # Replace only the values that were imputed in the main dataset
+  # Replace only values that were imputed
   data[imputed_indices, var] <- knn_imputed_data[imputed_indices, var]
 }
 
 # Descriptive statistics after imputation
 cleaned_missing_values <- calc_missing_values(data, questionnaire_vars)
-cat("Total missing values after cleaning:", cleaned_missing_values, "\n")
+cat("Total missing values after cleaning:", cleaned_missing_values, "\n") # Should be zero
 cat("Descriptive statistics of cleaned data:\n")
 print(head(summary(data[, questionnaire_vars])))
 
@@ -144,6 +144,11 @@ knitr::opts_chunk$set(echo = TRUE)
 ### Prepare for EFA
 
 ```{r}
+
+# Check internal consistency within whole dataset
+alpha <- psych::alpha(data[, questionnaire_vars])
+print("Chronbach's alpha for whole datset:")
+print(alpha)
 
 # Calculate the minimum number of subjects required to run EFA
 min_subjects <- num_vars * min_subjects_item
@@ -181,6 +186,17 @@ cfa_data <- data[!(data$record_id %in% split_ids), ]
 # Print sizes of subsets
 print(paste("Number of subjects in EFA data:", nrow(efa_data)))
 print(paste("Number of subjects in CFA data:", nrow(cfa_data)))
+
+# Check internal consistency within each subset (if applicable)
+if(split_ratio < 1.0) {
+  efa_data_alpha <- psych::alpha(efa_data[, questionnaire_vars])
+  print("Chronbach's alpha for EFA dataset:")
+  print(efa_data_alpha)
+
+  cfa_data_alpha <- psych::alpha(cfa_data[, questionnaire_vars])
+  print("Chronbach's alpha for CFA dataset:")
+  print(cfa_data_alpha)
+}
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -237,27 +253,11 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 
-# Perform bootstrap with each of the four methods
+# Perform bootstrap with four different methods to help determine number of factors
 boot_results_pa <- boot(data = efa_data[, questionnaire_vars], statistic = get_nfactors_pa, R = boot_iterations)
 boot_results_cd <- boot(data = efa_data[, questionnaire_vars], statistic = get_nfactors_cd, R = boot_iterations)
 boot_results_map <- boot(data = efa_data[, questionnaire_vars], statistic = get_nfactors_map, R = boot_iterations)
 boot_results_eigen <- boot(data = efa_data[, questionnaire_vars], statistic = get_nfactors_eigen, R = boot_iterations)
-
-# Extract the number of factors and eigenvalues from the boot_results_eigen
-boot_nfactors_eigen <- boot_results_eigen$t[, 1]  # The first element is the number of factors
-boot_eigenvalues <- boot_results_eigen$t[, -1]  # The remaining elements are eigenvalues
-
-# Calculate the mean and 95% confidence interval for each eigenvalue
-mean_eigenvalues <- colMeans(boot_eigenvalues, na.rm = TRUE)
-ci_eigenvalues <- apply(boot_eigenvalues, 2, compute_ci)
-
-# Create a data frame for plotting
-plot_data <- data.frame(
-  eigenvalue_index = 1:length(mean_eigenvalues),
-  mean_eigenvalue = mean_eigenvalues,
-  ci_lower = ci_eigenvalues[1, ],
-  ci_upper = ci_eigenvalues[2, ]
-)
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -266,8 +266,24 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 
+# Extract the number of factors and eigenvalues from the boot_results_eigen
+boot_nfactors_eigen <- boot_results_eigen$t[, 1]  # First element is the number of factors
+boot_eigenvalues <- boot_results_eigen$t[, -1]  # Remaining elements are eigenvalues
+
+# Calculate the mean and 95% confidence interval for each eigenvalue
+mean_eigenvalues <- colMeans(boot_eigenvalues, na.rm = TRUE)
+ci_eigenvalues <- apply(boot_eigenvalues, 2, compute_ci)
+
+# Create a data frame for plotting
+plot_eigen <- data.frame(
+  eigenvalue_index = 1:length(mean_eigenvalues),
+  mean_eigenvalue = mean_eigenvalues,
+  ci_lower = ci_eigenvalues[1, ],
+  ci_upper = ci_eigenvalues[2, ]
+)
+
 # Create a scree plot with 95% confidence intervals and a horizontal line at eigenvalue = 1
-ggplot(plot_data, aes(x = eigenvalue_index, y = mean_eigenvalue)) +
+boot_scree <- ggplot(plot_eigen, aes(x = eigenvalue_index, y = mean_eigenvalue)) +
   geom_line() +
   geom_point() +
   geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2) +
@@ -278,6 +294,14 @@ ggplot(plot_data, aes(x = eigenvalue_index, y = mean_eigenvalue)) +
     y = "Mean Eigenvalue"
   ) +
   theme_minimal()
+
+ggsave("boot_scree.pdf", boot_scree, width = 11.69, height = 8.27) # Save to PDF (A4)
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
 
 # Function to create histogram with mode indicated
 plot_histogram <- function(nfactors, title, label) {
@@ -302,7 +326,7 @@ p4 <- plot_histogram(boot_nfactors_eigen, "Eigenvalues > 1", "D")
 grid <- arrangeGrob(p1, p2, p3, p4, ncol=2)
 grid.draw(grid)
 
-ggsave("myplots.pdf", grid, width = 11.69, height = 8.27) # Save to PDF (A4)
+ggsave("nfactors_hist.pdf", grid, width = 11.69, height = 8.27) # Save to PDF (A4)
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
