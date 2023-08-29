@@ -61,7 +61,7 @@ iseed <- 123
 set.seed(iseed)
 
 # Set number of bootstrap iterations
-boot_iterations <- 100 # Set to 1000 or more
+boot_iterations <- 1000 # Set to 1000 or more
 
 # Minimum number of subjects per item for EFA
 min_subjects_item <- 20
@@ -116,19 +116,19 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 
 # Count rows with at least one NA item
-some_missing_rows <- sum(rowSums(is.na(data[, questionnaire_vars])) > 0)
-cat("Number of rows with one or more item values missing:", some_missing_rows, "\n")
+any_missing_rows <- sum(rowSums(is.na(data[, questionnaire_vars])) > 0)
+cat("Number of rows with one or more item values missing:", any_missing_rows, "\n")
 
 # Perform k-NN imputation on the subset of data
-imputed_data <- kNN(data[, questionnaire_vars]) # Default k=5, but adjust as needed
+knn_imputed_data <- kNN(data[, questionnaire_vars]) # Default k=5, but adjust as needed
 
 # For each variable, replace only the values that were imputed
 for (var in questionnaire_vars) {
   imp_col_name <- paste0(var, "_imp")
   # Identify the indices of the values that were imputed
-  imputed_indices <- which(imputed_data[[imp_col_name]] == TRUE)
+  imputed_indices <- which(knn_imputed_data[[imp_col_name]] == TRUE)
   # Replace only the values that were imputed in the main dataset
-  data[imputed_indices, var] <- imputed_data[imputed_indices, var]
+  data[imputed_indices, var] <- knn_imputed_data[imputed_indices, var]
 }
 
 # Descriptive statistics after imputation
@@ -140,6 +140,8 @@ print(head(summary(data[, questionnaire_vars])))
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+
+### Prepare for EFA
 
 ```{r}
 
@@ -155,7 +157,7 @@ cat("The available number of subjects is:", num_subjects, "\n")
 split_ratio <- min_subjects / num_subjects
 print(paste("The minimum split ratio required would be", split_ratio))
 
-# Define split ratio thresholds for clarity and adjustability
+# Define split ratio thresholds
 lower_threshold <- 0.5
 upper_threshold <- 0.8
 
@@ -726,13 +728,18 @@ if(length(items_to_remove) > 0) {
     select(-one_of(items_to_remove))
   print(paste("The following items were removed from the CFA dataset:", paste(items_to_remove, collapse = ", ")))
 } else {
+  cfa_data_rmv <- cfa_data
   print("No items were removed from the CFA dataset.")
 }
 
 # Get remaining questionnaire variables (all retained variables except 'record_id')
+if(length(items_to_remove) > 0) {
 cfa_questionnaire_vars <- names(cfa_data_rmv)[!(names(cfa_data_rmv) %in% "record_id")]
 print("The following items will be used in the CFA:")
 print(cfa_questionnaire_vars)
+} else {
+  cfa_questionnaire_vars <- questionnaire_vars
+}
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
