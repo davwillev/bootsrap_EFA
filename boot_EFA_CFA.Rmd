@@ -38,8 +38,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 ```{r}
-# Set the file path
-path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-08-21_2324.csv"
+# Set file path
+path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-08-31_1142.csv"
 
 # Import data from csv
 data <- read_csv(path)
@@ -47,7 +47,7 @@ data <- read_csv(path)
 # Get questionnaire variables (retain all variables except 'record_id')
 questionnaire_vars <- names(data)[!(names(data) %in% "record_id")]
 
-# Count the number of questionnaire variables
+# Count number of questionnaire variables
 num_vars <- length(questionnaire_vars)
 print(num_vars)
 
@@ -57,8 +57,8 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 
 # Set seed
-iseed <- 123
-set.seed(iseed)
+seed <- 123
+set.seed(seed)
 
 # Set number of bootstrap iterations
 boot_iterations <- 1000 # Set to 1000 or more
@@ -115,12 +115,16 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 
+# Compute the number of values that are to be imputed after removing rows with all missing values
+values_to_be_imputed <- calc_missing_values(data, questionnaire_vars)
+cat("Number of values to be imputed:", values_to_be_imputed, "\n")
+
 # Count rows with at least one NA value
 any_missing_rows <- sum(rowSums(is.na(data[, questionnaire_vars])) > 0)
 cat("Number of rows with one or more values missing:", any_missing_rows, "\n")
 
 # Perform k-NN imputation on remaining data
-knn_imputed_data <- kNN(data[, questionnaire_vars]) # Default k=5, but adjust as needed
+knn_imputed_data <- VIM::kNN(data[, questionnaire_vars]) # Default k=5, but adjust as needed
 
 # For each variable, replace NAs with imputed values
 for (var in questionnaire_vars) {
@@ -133,22 +137,64 @@ for (var in questionnaire_vars) {
 
 # Descriptive statistics after imputation
 cleaned_missing_values <- calc_missing_values(data, questionnaire_vars)
-cat("Total missing values after cleaning:", cleaned_missing_values, "\n") # Should be zero
+cat("Number of missing values after cleaning:", cleaned_missing_values, "\n") # Should be zero
 cat("Descriptive statistics of cleaned data:\n")
 print(head(summary(data[, questionnaire_vars])))
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Check internal consistency
+
+```{r}
+
+# Function to format output of (Chronbach's) alpha object
+format_alpha_output <- function(alpha_obj, item_names) {
+  output <- c()
+  output <- c(output, sprintf("Raw alpha: %.3f", alpha_obj$total$raw_alpha))
+  output <- c(output, "") # Add line spacing
+  
+  # Append item-total correlations with item names
+  output <- c(output, "Item-total correlations:")
+  for (i in 1:length(item_names)) {
+    output <- c(output, sprintf("%s: %.3f", item_names[i], alpha_obj$item.stats$raw.r[i]))
+  }
+  output <- c(output, "") # Add line spacing
+  
+  # Append alpha if item dropped with item names
+  output <- c(output, "Alpha if item dropped:")
+  for (i in 1:length(item_names)) {
+    output <- c(output, sprintf("%s: %.3f", item_names[i], alpha_obj$alpha.drop$raw_alpha[i]))
+  }
+  return(output)
+}
+
+# Check internal consistency within whole dataset
+alpha <- psych::alpha(data[, questionnaire_vars])
+
+# Format alpha output using the questionnaire_vars as item names
+formatted_alpha_output <- format_alpha_output(alpha, questionnaire_vars)
+
+# Add a title to the beginning of the formatted output
+alpha_output_with_title <- c("Chronbach's alpha for whole dataset:", "", formatted_alpha_output)
+
+# Save the formatted output with title to a text file
+writeLines(alpha_output_with_title, "Chronbachs_Alpha_Whole_Dataset.txt")
+
+# Capture output of the Chronbach's alpha and add title
+alpha_output <- capture.output(print(alpha))
+alpha_output_with_title <- c("Chronbach's alpha for whole dataset:", "", alpha_output)
+
+# Print and save captured output to a text file
+print(alpha_output_with_title)
+writeLines(alpha_output_with_title, "Chronbachs_Alpha_other.txt")
+
+```
+
 
 ### Prepare for EFA
 
 ```{r}
-
-# Check internal consistency within whole dataset
-alpha <- psych::alpha(data[, questionnaire_vars])
-print("Chronbach's alpha for whole datset:")
-print(alpha)
 
 # Calculate the minimum number of subjects required to run EFA
 min_subjects <- num_vars * min_subjects_item
@@ -207,7 +253,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # Function to get number of factors based on Parallel Analysis (PA)
 get_nfactors_pa <- function(data, indices) {
   bootstrap_data <- data[indices, ]  # Create the bootstrap sample
-  pa <- psych::fa.parallel(bootstrap_data, fm = "minres", plot = FALSE)
+  pa <- psych::fa.parallel(bootstrap_data, fm = "pa", plot = FALSE)
   nfactors_pa <- pa$nfact
   return(nfactors_pa)
 }
@@ -225,12 +271,12 @@ get_nfactors_cd <- function(data, indices) {
 # Function to get number of factors based on Minimum Average Partial (MAP) criterion
 get_nfactors_map <- function(data, indices) {
   bootstrap_data <- data[indices, ]  # Create the bootstrap sample
-  vss_results <- psych::VSS(bootstrap_data, rotate = "none", fm = "minres", plot = FALSE)
+  vss_results <- psych::VSS(bootstrap_data, rotate = "none", fm = "ml", plot = FALSE)
   nfactors_map <- which.min(vss_results$map)
   return(nfactors_map)
 }
 
-# Function to get number of factors based on Eigenvalues (and store eigenvalues)
+# Function to get number of factors based on Eigenvalues > 1 (and store eigenvalues)
 get_nfactors_eigen <- function(data, indices) {
   bootstrap_data <- data[indices, ]  # Create the bootstrap sample
   correlation_matrix <- cor(bootstrap_data)
@@ -291,7 +337,7 @@ boot_scree <- ggplot(plot_eigen, aes(x = eigenvalue_index, y = mean_eigenvalue))
   labs(
     title = "Scree Plot with Bootstrap Eigenvalues",
     x = "Eigenvalue Index",
-    y = "Mean Eigenvalue"
+    y = "Mean Eigenvalue (95% CI)"
   ) +
   theme_minimal()
 
@@ -353,7 +399,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-### Part 2: Run EFA
+### Part 2: EFA
 
 ```{r}
 
@@ -378,7 +424,7 @@ run_factor_analysis <- function(data, nfactors) {
   
   fa_result <- tryCatch({
     psych::fa(r = data, nfactors = nfactors, rotate = rotate_method, 
-              scores = "regression", fm = "minres")
+              scores = "regression", fm = "pa")
   }, error = function(e) {
     print(paste("EFA failed:", e$message))
     return(NULL)
@@ -565,52 +611,84 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
+## Run initial EFA
+
 ```{r}
 
 # Run initial EFA to create factor structure
 initial_efa <- run_factor_analysis(efa_data[, questionnaire_vars], nfactors)
+
 if(is.null(initial_efa)){
   print("Initial EFA failed. Check your data.")
 } else {
-  print("Initial EFA:")
-  print(initial_efa)
   
+  # Capture printed output of the EFA
+  efa_output <- capture.output(print(initial_efa))
+  efa_output_with_title <- c(paste("Initial EFA (", nfactors, "-factor model):"), efa_output)
+
+  # Print and save captured output with title to a text file
+  print(efa_output_with_title)
+  writeLines(efa_output_with_title, "Initial_EFA.txt")
+
   # Interpretation: 
   # Ideally, the initial EFA should provide insights into the factor structure. Check if specific items load strongly onto particular factors.
+}
   
-  # Run bootstrap EFA
+```
+  
+  
+## Run bootstrap EFA
+  
+```{r}
+
+  # Collect bootstrap EFA results
   bootstrap_results <- run_bootstrap_efa(efa_data, questionnaire_vars, boot_iterations, nfactors, initial_efa)
   
-  # Print summaries
+  # Print summary
   loadings_summary_unrotated <- format_loadings(loadings_summary(bootstrap_results$unrotated, nfactors))
-  print("Loadings summary without Procrustes rotations:")
-  print(loadings_summary_unrotated)
+  
+  # Save summary to a CSV file
+  write.csv(loadings_summary_unrotated, "Loadings_before_Procrustes.csv", row.names = FALSE)
   
   # Interpretation: 
   # Examine the loadings to see which items consistently load onto specific factors. Items with loadings close to 0 may not fit well with any factor.
   
   loadings_summary_rotated <- loadings_summary(bootstrap_results$rotated, nfactors)
   formatted_loadings_summary_rotated <- format_loadings(loadings_summary_rotated)
+
+  # Print summary
   print("Final loadings summary after Procrustes rotations:")
   print(formatted_loadings_summary_rotated)
   
+  # Save summary to a CSV file
+  write.csv(formatted_loadings_summary_rotated, "Loadings_after_Procrustes.csv", row.names = FALSE)
+
   # Interpretation:
   # Procrustes rotations help align the loadings of bootstrap EFAs with the initial EFA. Check if the rotated loadings offer clearer insights into the factor structure.
   
   variance_results <- factor_variance_summary(loadings_summary_rotated, nfactors)
+
+  # Print summary
   print("Explained Variance by Factors")
   print(variance_results)
   
+  # Save summary to a CSV file
+  write.csv(variance_results, "Explained_variance.csv", row.names = FALSE)
+
   # Interpretation:
   # Factors that explain a higher proportion of the variance are generally more significant. Factors explaining very little variance may be less informative or redundant.
   
   communalities_summary_rotated <- communalities_summary(bootstrap_results$rotated)
+  
+  # Save summary
   print("Communalities summary after Procrustes rotations:")
   print(communalities_summary_rotated)
   
+  # Save to a CSV fikle
+  write.csv(communalities_summary_rotated, "Communalities.csv", row.names = FALSE)
+  
   # Interpretation:
   # Communalities reflect how well each item is represented by the factors. Items with low communalities might not fit well with the chosen factor structure.
-}
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -745,24 +823,23 @@ knitr::opts_chunk$set(echo = TRUE)
 # Create final list of items to remove
 items_to_remove <- union(weak_loading_items, cross_loading_items)
 
-# Remove any items from CFA data that fit removal criteria
+# Remove any items from CFA data that fit removal criteria and get remaining questionnaire variables
 if(length(items_to_remove) > 0) {
   # Remove these items from the CFA dataset
   cfa_data_rmv <- cfa_data %>%
     select(-one_of(items_to_remove))
+  
   print(paste("The following items were removed from the CFA dataset:", paste(items_to_remove, collapse = ", ")))
+  
+  # Get remaining questionnaire variables (all retained variables except 'record_id')
+  cfa_questionnaire_vars <- names(cfa_data_rmv)[!(names(cfa_data_rmv) %in% "record_id")]
+  print("The following items will be used in the CFA:")
+  print(cfa_questionnaire_vars)
+  
 } else {
   cfa_data_rmv <- cfa_data
-  print("No items were removed from the CFA dataset.")
-}
-
-# Get remaining questionnaire variables (all retained variables except 'record_id')
-if(length(items_to_remove) > 0) {
-cfa_questionnaire_vars <- names(cfa_data_rmv)[!(names(cfa_data_rmv) %in% "record_id")]
-print("The following items will be used in the CFA:")
-print(cfa_questionnaire_vars)
-} else {
   cfa_questionnaire_vars <- questionnaire_vars
+  print("No items were removed from the CFA dataset.")
 }
 
 knitr::opts_chunk$set(echo = TRUE)
@@ -800,36 +877,61 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 
 # Fit CFA model using lavaan
-cfa_model <- cfa(cfa_model_syntax, data = cfa_data_rmv, missing = "fiml")
-summary(cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
+cfa_model <- lavaan::cfa(cfa_model_syntax, data = cfa_data_rmv, missing = "fiml")
+initial_cfa <- summary(cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
 
-# Bootstrapping the CFA model
-boot_cfa_model <- bootstrapLavaan(cfa_model, R = boot_iterations, iseed = iseed, FUN = "fitMeasures", fit.measures = c("chisq", "cfi", "tli", "rmsea", "srmr"))
+# Capture printed output of the initial CFA model
+cfa_output <- capture.output(print(initial_cfa))
+
+# Bootstrapping the initial CFA model
+boot_cfa_model <- lavaan::bootstrapLavaan(cfa_model, R = boot_iterations, iseed = seed, FUN = "fitMeasures", fit.measures = c("chisq", "cfi", "tli", "rmsea", "srmr", "aic", "bic"))
+
+# Get summary of the bootstrapped CFA model
+boot_cfa <- summary(boot_cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
+
+# Capture printed output of the bootstrapped CFA
+boot_cfa_output <- capture.output(print(boot_cfa))
 
 # Extract the bootstrapped distributions for each measure
-boot_chisq <- boot_cfa_model[, "chisq"]
-boot_cfi <- boot_cfa_model[, "cfi"]
-boot_tli <- boot_cfa_model[, "tli"]
-boot_rmsea <- boot_cfa_model[, "rmsea"]
-boot_srmr <- boot_cfa_model[, "srmr"]
+boot_measures <- list(
+  chisq = boot_cfa_model[, "chisq"],
+  cfi = boot_cfa_model[, "cfi"],
+  tli = boot_cfa_model[, "tli"],
+  rmsea = boot_cfa_model[, "rmsea"],
+  srmr = boot_cfa_model[, "srmr"],
+  aic = boot_cfa_model[, "aic"],
+  bic = boot_cfa_model[, "bic"]
+)
 
-# Calculate and print the 2.5th and 97.5th percentiles for the 95% confidence interval for each measure
-ci_chisq <- compute_ci(boot_chisq, "Chi-Square")
-ci_cfi <- compute_ci(boot_cfi, "CFI")
-ci_tli <- compute_ci(boot_tli, "TLI")
-ci_rmsea <- compute_ci(boot_rmsea, "RMSEA")
-ci_srmr <- compute_ci(boot_srmr, "SRMR")
+# Calculate the 2.5th and 97.5th percentiles for the 95% confidence interval for each measure
+ci_measures <- lapply(boot_measures, function(measure) {
+  compute_ci(measure)
+})
 
-# Get summary of the bootstrapped model
-summary(boot_cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
-
-# Get the test statistic for the original sample
+# Get the test statistic and degrees of freedom for the original sample
 T_orig <- fitMeasures(cfa_model, "chisq")
-print(T_orig)
+df_orig <- fitMeasures(cfa_model, "df")
 
 # Compute a bootstrap based p-value for chi-square
-pvalue_boot <- length(which(boot_chisq > T_orig)) / length(boot_chisq)
-print(paste0("Bootstrap chi-square p-value: ", pvalue_boot))
+pvalue_boot <- length(which(boot_measures$chisq > T_orig)) / length(boot_measures$chisq)
+
+# Capture the final output
+final_output <- capture.output({
+  cat("Initial CFA model:\n")
+  cat(cfa_output, sep="\n")
+  cat("\nBootstrapped CFA model:", nfactors, "-factor model\n")
+  cat(boot_cfa_output, sep="\n")
+  cat("\nConfidence Intervals for Bootstrapped Measures:\n")
+  for (name in names(ci_measures)) {
+    cat(name, ":", ci_measures[[name]], "\n")
+  }
+  cat("\nTest Statistic for the Original Sample (Chi-Square):", T_orig, "\n")
+  cat("Degrees of Freedom for chi-square test:", df_orig, "\n")
+  cat("Bootstrap chi-square p-value:", pvalue_boot, "\n")
+})
+
+# Save captured output to a text file
+writeLines(final_output, "CFA_Summary.txt")
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -838,19 +940,18 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 
-# Construct the CFA full model syntax by having all items load on a single common latent factor
-latent_factor <- "common_factor"
-cfa_full_model_syntax <- paste(latent_factor, "=~", paste(questionnaire_vars, collapse = " + "))
+# Construct the CFA full model syntax by having all items load on a single common latent factor (MR1)
+latent_factor <- "MR1"
+cfa_full_model_syntax <- paste(latent_factor, "=~", paste(questionnaire_vars, collapse = " + "), "\n")
 
-# Print the CFA full model syntax for verification
+# Print the CFA full (unrestricted, h1) model syntax for verification
 print(cfa_full_model_syntax)
 
-# Fit the unrestricted (full) model
-full_cfa_model <- cfa(cfa_full_model_syntax, data = cfa_data, missing = "fiml")
+# Fit the full (unrestricted, h1) model
+full_cfa_model <- lavaan::cfa(cfa_full_model_syntax, data = cfa_data, missing = "fiml")
 
-# Compute bootstrap LRT p-value to compare the models
-# pvalue_LRT <- bootstrapLRT(h0 = cfa_model, h1 = full_cfa_model, R = boot_iterations)
-pvalue_LRT <- bootstrapLRT(h0 = full_cfa_model, h1 = cfa_model, R = boot_iterations, type = "nonparametric")
+# Compute bootstrap LRT p-value to compare the restricted and unrestricted models
+pvalue_LRT <- lavaan::bootstrapLRT(h0 = cfa_model, h1 = full_cfa_model, R = boot_iterations, type = "nonparametric")
 
 # Print the bootstrap LRT p-value
 print(paste0("Bootstrap LRT chi-square p-value: ", pvalue_LRT))
