@@ -1054,12 +1054,18 @@ boot_param_keys <- gsub("^param_", "", boot_param_keys)
 params_exist_in_boot <- initial_cfa_params %in% boot_param_keys
 print(params_exist_in_boot)
 
+# Find parameters in initial CFA that are not in bootstrap CFA
+missing_in_boot <- initial_cfa_params[!params_exist_in_boot]
+
 # Check for parameters in the initial CFA model but not in boot_param_means
 if (length(missing_in_boot) > 0) {
     print(paste("Parameters in initial CFA model but not in boot_param_means:", paste(missing_in_boot, collapse = ", ")))
 } else {
     print("All parameters from the initial CFA model are present in boot_param_means.")
 }
+
+# Find parameters in bootstrap CFA that are not in initial CFA
+missing_in_initial <- boot_param_keys[!boot_param_keys %in% initial_cfa_params]
 
 # Check for parameters in boot_param_means but not in the initial CFA model
 if (length(missing_in_initial) > 0) {
@@ -1098,22 +1104,28 @@ for (i in 1:length(initial_cfa_params)) {
 # Print the custom_labels to see if they were generated correctly
 print(custom_labels)
 
-# Create the updated CFA model plot using custom labels
-boot_cfa_plot <- semPaths(initial_cfa_model, 
-                          labels = custom_labels, 
-                          edge.label.cex = 0.7, 
-                          layout = "tree", 
-                          intercepts = FALSE, 
-                          residuals = FALSE, 
-                          style = "lisrel", 
-                          curveAdjacent = TRUE, 
-                          rotation = 2)
+# Create the mermaid.js format for the CFA model
 
-# Display the updated plot
-print(boot_cfa_plot)
+# Create the mermaid diagram string
+mermaid_diagram <- "graph TD;"
 
+# Specify node shapes for latent variables
+for (node in latent_nodes) {
+  mermaid_diagram <- paste0(mermaid_diagram, node, "[(", node, ")]\n")
+}
 
+# Specify node shapes for observed variables
+for (node in observed_nodes) {
+  mermaid_diagram <- paste0(mermaid_diagram, node, "{", node, "}\n")
+}
 
+# Add factor loadings with custom labels
+for (i in 1:length(factor_rels)) {
+  mermaid_diagram <- paste0(mermaid_diagram, factor_rels[i], "|", custom_labels[i], "|;\n")
+}
+
+# Display the diagram with DiagrammeR
+DiagrammeR::DiagrammeR(diagram = mermaid_diagram)
 
 
 ```
