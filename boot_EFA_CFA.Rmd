@@ -11,6 +11,7 @@ output: html_document
 
 packages <- c(
   "boot",
+  "DiagrammeR",
   "EFA.dimensions",
   "EFAtools",
   "grid",
@@ -23,6 +24,7 @@ packages <- c(
   "GPArotation",
   "readr",
   "semTools",
+  "semPlot",
   "tidyverse",
   "VIM")
 
@@ -39,7 +41,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 # Set file path
-path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-08-31_1142.csv"
+path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/7-item_ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-08-31_1142.csv"
 
 # Import data from csv
 data <- read_csv(path)
@@ -49,7 +51,7 @@ questionnaire_vars <- names(data)[!(names(data) %in% "record_id")]
 
 # Count number of questionnaire variables
 num_vars <- length(questionnaire_vars)
-print(num_vars)
+print(paste("There are", num_vars, "variables (items) in this dataset"))
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -57,11 +59,11 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 
 # Set seed
-seed <- 123
+seed <- 1234
 set.seed(seed)
 
 # Set number of bootstrap iterations
-boot_iterations <- 1000 # Set to 1000 or more
+boot_iterations <- 100 # Set to 1000 or more
 
 # Minimum number of subjects per item for EFA
 min_subjects_item <- 20
@@ -335,10 +337,11 @@ boot_scree <- ggplot(plot_eigen, aes(x = eigenvalue_index, y = mean_eigenvalue))
   geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2) +
   geom_hline(yintercept = 1, linetype="dashed", color = "red") +  # Add a horizontal line at eigenvalue = 1
   labs(
-    title = "Scree Plot with Bootstrap Eigenvalues",
-    x = "Eigenvalue Index",
+    #title = "Scree Plot with Bootstrap Eigenvalues",
+    x = "Factor",
     y = "Mean Eigenvalue (95% CI)"
   ) +
+  scale_x_continuous(breaks = seq(min(plot_eigen$eigenvalue_index), max(plot_eigen$eigenvalue_index), by = 1)) + # Force x-axis intervals to be integers
   theme_minimal()
 
 ggsave("boot_scree.pdf", boot_scree, width = 11.69, height = 8.27) # Save to PDF (A4)
@@ -480,7 +483,7 @@ efa_func <- function(data, indices, nfactors, initial_efa) {
   return(list(rotated = loadings_df, unrotated = unrotated_loadings_df))
 }
 
-# Function to perform bootstrap EFA
+# Function to perform EFA on bootstrapped sample
 run_bootstrap_efa <- function(efa_data, questionnaire_vars, boot_iterations, nfactors, initial_efa) {
   results_list_rotated <- vector("list", boot_iterations)
   results_list_unrotated <- vector("list", boot_iterations)
@@ -555,34 +558,41 @@ format_loadings <- function(loadings_summary) {
 }
 
 # Summarise factor variances
-factor_variance_summary <- function(loadings_df, nfactors) {
+factor_variance_summary <- function(bootstrap_results, nfactors) {
   
-  total_variance <- sum(loadings_df$mean^2)
+  # Get the total number of items
+  total_items <- length(bootstrap_results[[1]][,1])
   
-  # Create an empty dataframe to store the summary results for each factor
-  results <- data.frame(factor = character(),
-                        SS_loadings = numeric(),
-                        perc_of_variance = numeric(),
-                        cum_perc = numeric())
-  cum_variance <- 0
+  # Initialize lists to store SS_loadings for each bootstrap iteration
+  SS_loadings_list <- list()
   
-  for (i in 1:nfactors) {
-    factor_name <- paste0("MR", i)
-    factor_loadings <- loadings_df %>%
-      filter(factor == factor_name)
-    
-    SS_loadings <- sum(factor_loadings$mean^2)
-    perc_of_variance <- (SS_loadings / total_variance) * 100
-    cum_variance <- cum_variance + SS_loadings
-    cum_perc <- (cum_variance / total_variance) * 100
-    
-    results <- rbind(results, data.frame(factor = factor_name,
-                                         SS_loadings = SS_loadings,
-                                         perc_of_variance = perc_of_variance,
-                                         cum_perc = cum_perc))
+  # Iterate over each bootstrap result to compute SS_loadings
+  for (i in 1:length(bootstrap_results)) {
+    SS_loadings <- sum(bootstrap_results[[i]][,1]^2)
+    SS_loadings_list <- append(SS_loadings_list, SS_loadings)
   }
+  
+  # Convert list to vector for easier calculations
+  SS_loadings_vector <- unlist(SS_loadings_list)
+  
+  # Calculate mean, CI for SS_loadings, and proportion of variance
+  mean_SS_loadings <- mean(SS_loadings_vector)
+  ci_values_SS <- compute_ci(SS_loadings_vector)
+  perc_of_variance <- (mean_SS_loadings / total_items) * 100
+  prop_variance_bootstrap <- mean_SS_loadings / total_items
+  
+  results <- data.frame(factor = paste0("MR", nfactors),
+                        SS_loadings = mean_SS_loadings,
+                        perc_of_variance = perc_of_variance,
+                        prop_variance_bootstrap = prop_variance_bootstrap,
+                        CI_lower_SS = ci_values_SS[1],
+                        CI_upper_SS = ci_values_SS[2],
+                        CI_lower_prop = ci_values_SS[1] / total_items,
+                        CI_upper_prop = ci_values_SS[2] / total_items)
+  
   return(results)
 }
+
 
 # Function returning summary of factor communalities from bootstrap EFA
 communalities_summary <- function(loadings_list) {
@@ -666,7 +676,7 @@ if(is.null(initial_efa)){
   # Interpretation:
   # Procrustes rotations help align the loadings of bootstrap EFAs with the initial EFA. Check if the rotated loadings offer clearer insights into the factor structure.
   
-  variance_results <- factor_variance_summary(loadings_summary_rotated, nfactors)
+  variance_results <- factor_variance_summary(bootstrap_results$rotated, nfactors)
 
   # Print summary
   print("Explained Variance by Factors")
@@ -735,7 +745,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-## Part 3: Remove unwanted items
+## Part 3: Remove any unwanted items
 
 ```{r}
 
@@ -748,8 +758,27 @@ loadings_summary_rotated <- loadings_summary_rotated %>%
   mutate(primary_factor = factor[which.max(mean)]) %>%
   ungroup()
 
-# Function to identify items with weak loadings
-find_weak_loading <- function(loadings_summary, loadings_threshold) {
+# Function to identify items with weak loadings (using mean)
+find_weak_loading_mean <- function(loadings_summary, loadings_threshold) {
+  # Group by item and identify the primary factor for each item
+  # Check if the primary factor's mean loading is below the threshold
+  weak_loading_items <- loadings_summary %>%
+    group_by(item) %>%
+    mutate(primary_factor = factor[which.max(mean)],
+           max_mean_primary = max(mean[factor == primary_factor])) %>%
+    ungroup() %>%
+    # Filter items where the primary factor's mean loading is below the threshold
+    filter(max_mean_primary <= loadings_threshold) %>%
+    # Extract unique items
+    distinct(item) %>%
+    pull(item)
+  
+  # Return a list of items with weak loadings
+  return(weak_loading_items)
+}
+
+# Function to identify items with weak loadings (using lower 95% CI)
+find_weak_loading_ci <- function(loadings_summary, loadings_threshold) {
   # Group by item and identify the primary factor for each item
   # Compute the lower bound of the confidence interval for the primary factor
   weak_loading_items <- loadings_summary %>%
@@ -767,8 +796,25 @@ find_weak_loading <- function(loadings_summary, loadings_threshold) {
   return(weak_loading_items)
 }
 
-# Function to identify items with cross-loadings
-find_cross_loading <- function(loadings_summary, loadings_threshold) {
+# Function to identify items with cross-loadings (using the mean)
+find_cross_loading_mean <- function(loadings_summary, loadings_threshold) {
+  # Group by item and count the number of factors where the mean loading is above the threshold
+  cross_loading_items <- loadings_summary %>%
+    group_by(item) %>%
+    mutate(cross_loading_count = sum(mean >= loadings_threshold)) %>%
+    ungroup() %>%
+    # Filter items that load onto more than one factor based on the mean loading threshold
+    filter(cross_loading_count > 1) %>%
+    # Extract unique items
+    distinct(item) %>%
+    pull(item)
+  
+  # Return a list of items with cross-loadings
+  return(cross_loading_items)
+}
+
+# Function to identify items with cross-loadings (using lower 95% CI)
+find_cross_loading_ci <- function(loadings_summary, loadings_threshold) {
   # Group by item and count the number of factors where the CI lower bound is above the threshold
   cross_loading_items <- loadings_summary %>%
     group_by(item) %>%
@@ -791,14 +837,14 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 
 # Identify items to remove
-weak_loading_items <- find_weak_loading(loadings_summary_rotated, loadings_threshold)
-cross_loading_items <- find_cross_loading(loadings_summary_rotated, loadings_threshold)
+weak_loading_items <- find_weak_loading_ci(loadings_summary_rotated, loadings_threshold)
+cross_loading_items <- find_cross_loading_ci(loadings_summary_rotated, loadings_threshold)
 
 # Print items meeting each criterion
 if(length(weak_loading_items) > 0) {
-  print(paste("The items that meet the criterion for weak loading (i.e., 95% CIs included", loadings_threshold, ") are:", paste(weak_loading_items, collapse = ", ")))
+  print(paste("The items that meet the criterion for weak loading", loadings_threshold, ") are:", paste(weak_loading_items, collapse = ", ")))
 } else {
-  print(paste("No items met the criterion for weak loading (i.e., 95% CIs did not include", loadings_threshold, ")."))
+  print(paste("No items met the criterion for weak loading.", loadings_threshold, ")."))
 }
 
 if(length(cross_loading_items) > 0) {
@@ -846,12 +892,12 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-## Part 4: Perform bootstrapped CFA
+### Part 4: Bootstrapped CFA
 
 ```{r}
 
 # Create an empty vector to store the CFA model syntax
-cfa_model_syntax <- ""
+initial_cfa_model_syntax <- ""
 
 # Group items by their primary factors
 grouped_items <- loadings_summary_rotated %>%
@@ -864,53 +910,87 @@ grouped_items <- loadings_summary_rotated %>%
 for(i in 1:nrow(grouped_items)) {
   factor <- grouped_items$primary_factor[i]
   items <- grouped_items$items[i]
-  cfa_model_syntax <- paste(cfa_model_syntax, factor, "=~", items, "\n")
+  initial_cfa_model_syntax <- paste(initial_cfa_model_syntax, factor, "=~", items, "\n")
 }
 
 # Print the CFA model syntax
-print(cfa_model_syntax)
+print(initial_cfa_model_syntax)
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+### Run Bootstrap CFA
 
 ```{r}
 
-# Fit CFA model using lavaan
-cfa_model <- lavaan::cfa(cfa_model_syntax, data = cfa_data_rmv, missing = "fiml")
-initial_cfa <- summary(cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
+# Fit initial CFA model using lavaan
+initial_cfa_model <- lavaan::cfa(initial_cfa_model_syntax, data = cfa_data_rmv, missing = "fiml")
 
-# Capture printed output of the initial CFA model
-cfa_output <- capture.output(print(initial_cfa))
+# Create summary
+initial_cfa <- summary(initial_cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
 
-# Bootstrapping the initial CFA model
-boot_cfa_model <- lavaan::bootstrapLavaan(cfa_model, R = boot_iterations, iseed = seed, FUN = "fitMeasures", fit.measures = c("chisq", "cfi", "tli", "rmsea", "srmr", "aic", "bic"))
+# Capture printed summary of initial CFA model
+initial_cfa_output <- capture.output(print(initial_cfa))
+
+# Custom function to extract measures from bootstrapLavaan
+custom_extract <- function(lavaan_obj) {
+  
+  # Extract fit measures
+  fit_measures <- lavaan::fitMeasures(lavaan_obj, fit.measures = c("chisq", "cfi", "tli", "rmsea", "srmr", "aic", "bic"))
+  
+  # Add prefix to fit measures
+  names(fit_measures) <- paste0("fit_", names(fit_measures))
+   
+  # Extract parameter estimates
+  param_estimates <- lavaan::parameterEstimates(lavaan_obj)
+  
+  # Create parameter names with prefix and structure
+  param_names <- paste("param_", param_estimates$lhs, param_estimates$op, param_estimates$rhs, sep="")
+  params <- setNames(param_estimates$est, param_names)
+  
+  # Extract coefficients
+  coefs <- lavaan::coef(lavaan_obj)
+  names(coefs) <- paste0("coef_", names(coefs))
+  
+  # Combine the fit measures, coefficients, and parameter estimates
+  combined_results <- c(fit_measures, coefs, params)
+  
+  # Return the combined results
+  return(combined_results)
+}
+
+
+# Bootstrap the initial CFA model
+boot_cfa_model <- lavaan::bootstrapLavaan(initial_cfa_model, 
+                                          R = boot_iterations, 
+                                          iseed = seed, 
+                                          FUN = custom_extract
+                                          )
+
+```
+
+### Extract bootstrap CFA results
+
+```{r}
 
 # Get summary of the bootstrapped CFA model
-boot_cfa <- summary(boot_cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
+boot_cfa_summary <- summary(boot_cfa_model, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
 
 # Capture printed output of the bootstrapped CFA
-boot_cfa_output <- capture.output(print(boot_cfa))
+boot_cfa_output <- capture.output(print(boot_cfa_summary))
 
-# Extract the bootstrapped distributions for each measure
-boot_measures <- list(
-  chisq = boot_cfa_model[, "chisq"],
-  cfi = boot_cfa_model[, "cfi"],
-  tli = boot_cfa_model[, "tli"],
-  rmsea = boot_cfa_model[, "rmsea"],
-  srmr = boot_cfa_model[, "srmr"],
-  aic = boot_cfa_model[, "aic"],
-  bic = boot_cfa_model[, "bic"]
-)
+# Extract all bootstrapped measures and coefficients from boot_cfa_model
+boot_measures <- list()
+for (name in colnames(boot_cfa_model)) {
+  boot_measures[[name]] <- boot_cfa_model[, name]
+}
 
 # Calculate the 2.5th and 97.5th percentiles for the 95% confidence interval for each measure
-ci_measures <- lapply(boot_measures, function(measure) {
-  compute_ci(measure)
-})
+ci_measures <- lapply(boot_measures, compute_ci)
 
 # Get the test statistic and degrees of freedom for the original sample
-T_orig <- fitMeasures(cfa_model, "chisq")
-df_orig <- fitMeasures(cfa_model, "df")
+T_orig <- fitMeasures(initial_cfa_model, "chisq")
+df_orig <- fitMeasures(initial_cfa_model, "df")
 
 # Compute a bootstrap based p-value for chi-square
 pvalue_boot <- length(which(boot_measures$chisq > T_orig)) / length(boot_measures$chisq)
@@ -918,7 +998,7 @@ pvalue_boot <- length(which(boot_measures$chisq > T_orig)) / length(boot_measure
 # Capture the final output
 final_output <- capture.output({
   cat("Initial CFA model:\n")
-  cat(cfa_output, sep="\n")
+  cat(initial_cfa_output, sep="\n")
   cat("\nBootstrapped CFA model:", nfactors, "-factor model\n")
   cat(boot_cfa_output, sep="\n")
   cat("\nConfidence Intervals for Bootstrapped Measures:\n")
@@ -933,29 +1013,107 @@ final_output <- capture.output({
 # Save captured output to a text file
 writeLines(final_output, "CFA_Summary.txt")
 
-knitr::opts_chunk$set(echo = TRUE)
 ```
 
-### Compare full and restricted models
+
+### Create path diagram for initial CFA
 
 ```{r}
 
-# Construct the CFA full model syntax by having all items load on a single common latent factor (MR1)
-latent_factor <- "MR1"
-cfa_full_model_syntax <- paste(latent_factor, "=~", paste(questionnaire_vars, collapse = " + "), "\n")
+# Plot the initial CFA model
+initial_cfa_plot <- semPaths(initial_cfa_model, 
+                             whatLabels = "est", 
+                             edge.label.cex = 0.7, 
+                             layout = "tree", 
+                             intercepts = FALSE, 
+                             residuals = FALSE, 
+                             style = "lisrel", 
+                             curveAdjacent = TRUE, 
+                             rotation = 2)
 
-# Print the CFA full (unrestricted, h1) model syntax for verification
-print(cfa_full_model_syntax)
+# Display the plot
+initial_cfa_plot
 
-# Fit the full (unrestricted, h1) model
-full_cfa_model <- lavaan::cfa(cfa_full_model_syntax, data = cfa_data, missing = "fiml")
+# Extract parameter names from the initial CFA
+initial_param_estimates <- parameterEstimates(initial_cfa_model)
+initial_cfa_params <- paste(initial_param_estimates$lhs, initial_param_estimates$op, initial_param_estimates$rhs, sep="")
+print(initial_cfa_params)
+```
 
-# Compute bootstrap LRT p-value to compare the restricted and unrestricted models
-pvalue_LRT <- lavaan::bootstrapLRT(h0 = cfa_model, h1 = full_cfa_model, R = boot_iterations, type = "nonparametric")
+### Compare parameters from initial and bootstrap CFA
 
-# Print the bootstrap LRT p-value
-print(paste0("Bootstrap LRT chi-square p-value: ", pvalue_LRT))
+```{r}
+
+# Select parameters starting with "param_" from boot_cfa_params
+boot_param_keys <- colnames(boot_cfa_model)[grepl("^param_", colnames(boot_cfa_model))]
+
+# Remove the "param_" prefix from these keys
+boot_param_keys <- gsub("^param_", "", boot_param_keys)
+
+# Check existence of each parameter from the initial CFA model in boot_param_means
+params_exist_in_boot <- initial_cfa_params %in% boot_param_keys
+print(params_exist_in_boot)
+
+# Check for parameters in the initial CFA model but not in boot_param_means
+if (length(missing_in_boot) > 0) {
+    print(paste("Parameters in initial CFA model but not in boot_param_means:", paste(missing_in_boot, collapse = ", ")))
+} else {
+    print("All parameters from the initial CFA model are present in boot_param_means.")
+}
+
+# Check for parameters in boot_param_means but not in the initial CFA model
+if (length(missing_in_initial) > 0) {
+    print(paste("Parameters in boot_param_means but not in initial CFA model:", paste(missing_in_initial, collapse = ", ")))
+} else {
+    print("All parameters from boot_param_means are present in the initial CFA model.")
+}
+
+# Compute the mean for each bootstrapped 'param_' parameter
+boot_param_means <- sapply(boot_param_keys, function(param) {
+    mean(boot_cfa_model[, paste0("param_", param)])
+})
+
+# Print out the means
+print(boot_param_means)
+
+```
+
+### Create path diagram for bootstrap CFA
+
+```{r}
+
+# Create an empty vector to store custom labels
+custom_labels <- vector("character", length(initial_cfa_params))
+
+# Generate the custom labels using a basic loop
+for (i in 1:length(initial_cfa_params)) {
+  param <- initial_cfa_params[i]
+  if (param %in% names(boot_param_means)) {
+    custom_labels[i] <- as.character(round(boot_param_means[param], 2))
+  } else {
+    custom_labels[i] <- param
+  }
+}
+
+# Print the custom_labels to see if they were generated correctly
+print(custom_labels)
+
+# Create the updated CFA model plot using custom labels
+boot_cfa_plot <- semPaths(initial_cfa_model, 
+                          labels = custom_labels, 
+                          edge.label.cex = 0.7, 
+                          layout = "tree", 
+                          intercepts = FALSE, 
+                          residuals = FALSE, 
+                          style = "lisrel", 
+                          curveAdjacent = TRUE, 
+                          rotation = 2)
+
+# Display the updated plot
+print(boot_cfa_plot)
 
 
-knitr::opts_chunk$set(echo = TRUE)
+
+
+
 ```
