@@ -14,6 +14,7 @@ packages <- c(
   "DiagrammeR",
   "EFA.dimensions",
   "EFAtools",
+  "GPArotation",
   "grid",
   "gridExtra",
   "lavaan",
@@ -21,7 +22,7 @@ packages <- c(
   "naniar",
   "psy",
   "psych",
-  "GPArotation",
+  "qgraph",
   "readr",
   "semTools",
   "semPlot",
@@ -1034,15 +1035,24 @@ initial_cfa_plot <- semPaths(initial_cfa_model,
 # Display the plot
 initial_cfa_plot
 
-# Extract parameter names from the initial CFA
-initial_param_estimates <- parameterEstimates(initial_cfa_model)
-initial_cfa_params <- paste(initial_param_estimates$lhs, initial_param_estimates$op, initial_param_estimates$rhs, sep="")
-print(initial_cfa_params)
 ```
 
 ### Compare parameters from initial and bootstrap CFA
 
 ```{r}
+
+# Extract parameter names from the initial CFA
+initial_param_estimates <- parameterEstimates(initial_cfa_model)
+
+# Filter out only the factor loadings from the parameter estimates
+initial_factor_loadings <- initial_param_estimates$est[initial_param_estimates$op == "=~"]
+
+# Print out the initial factor loadings
+print("Initial CFA Factor Loadings:")
+print(initial_factor_loadings)
+
+initial_cfa_params <- paste(initial_param_estimates$lhs, initial_param_estimates$op, initial_param_estimates$rhs, sep="")
+print(initial_cfa_params)
 
 # Select parameters starting with "param_" from boot_cfa_params
 boot_param_keys <- colnames(boot_cfa_model)[grepl("^param_", colnames(boot_cfa_model))]
@@ -1080,6 +1090,7 @@ boot_param_means <- sapply(boot_param_keys, function(param) {
 })
 
 # Print out the means
+print("Bootstrapped Parameter Means:")
 print(boot_param_means)
 
 ```
@@ -1088,44 +1099,68 @@ print(boot_param_means)
 
 ```{r}
 
-# Create an empty vector to store custom labels
-custom_labels <- vector("character", length(initial_cfa_params))
+# Create a new plot object for the updated plot with bootstrapped means
+boot_cfa_plot <- initial_cfa_plot
 
-# Generate the custom labels using a basic loop
-for (i in 1:length(initial_cfa_params)) {
-  param <- initial_cfa_params[i]
-  if (param %in% names(boot_param_means)) {
-    custom_labels[i] <- as.character(round(boot_param_means[param], 2))
-  } else {
-    custom_labels[i] <- param
-  }
+# Filter boot_param_means to only include relationships (factor loadings)
+boot_factor_loadings <- boot_param_means[grep("=~", names(boot_param_means))]
+
+# List to store formatted labels
+formatted_labels <- vector("character", length(boot_factor_loadings))
+
+# Iterate over each factor loading to format labels
+for (i in 1:length(boot_factor_loadings)) {
+  # Extract the parameter name
+  param_name <- names(boot_factor_loadings)[i]
+  
+  # Extract bootstrapped values for the factor loading from boot_cfa_model
+  boot_values <- boot_cfa_model[, paste0("param_", param_name)]
+  
+  # Calculate 95% CI
+  ci <- compute_ci(boot_values, param_name)
+  
+  # Format the label
+  formatted_labels[i] <- paste0(round(boot_factor_loadings[i], 2), " (", round(ci[1], 2), ", ", round(ci[2], 2), ")")
 }
 
-# Print the custom_labels to see if they were generated correctly
-print(custom_labels)
+# Update boot_cfa_plot with the new formatted labels
+boot_cfa_plot$Arguments$edge.labels <- formatted_labels
 
-# Create the mermaid.js format for the CFA model
+# Truncate the item names to only the first word using parameter names
+original_item_names <- sapply(strsplit(names(boot_factor_loadings), "~"), `[`, 2)
+truncated_labels <- sapply(strsplit(original_item_names, "_"), `[`, 1)
+boot_cfa_plot$Arguments$labels[1:length(truncated_labels)] <- truncated_labels
 
-# Create the mermaid diagram string
-mermaid_diagram <- "graph TD;"
+# Calculate the width based on the number of characters in the longest label
+max_width <- max(nchar(truncated_labels))
 
-# Specify node shapes for latent variables
-for (node in latent_nodes) {
-  mermaid_diagram <- paste0(mermaid_diagram, node, "[(", node, ")]\n")
+# Set max character limit for item labels
+max_char <- 10 # Adjust this as per requirements
+
+# Set a maximum width if needed
+max_allowed_width <- max_char
+if (max_width > max_allowed_width) {
+  max_width <- max_allowed_width
 }
 
-# Specify node shapes for observed variables
-for (node in observed_nodes) {
-  mermaid_diagram <- paste0(mermaid_diagram, node, "{", node, "}\n")
-}
+# Adjust the width of only the observed variable nodes in the plot to this calculated width
+boot_cfa_plot$Arguments$vsize[1:length(truncated_labels)] <- rep(max_width, length(truncated_labels))
 
-# Add factor loadings with custom labels
-for (i in 1:length(factor_rels)) {
-  mermaid_diagram <- paste0(mermaid_diagram, factor_rels[i], "|", custom_labels[i], "|;\n")
-}
+# Extracting edge labels from initial_cfa_plot
+initial_labels <- initial_cfa_plot$Arguments$edge.labels
 
-# Display the diagram with DiagrammeR
-DiagrammeR::DiagrammeR(diagram = mermaid_diagram)
+# Extracting edge labels from boot_cfa_plot
+boot_labels <- boot_cfa_plot$Arguments$edge.labels
+
+# Printing out the values for comparison
+print("Initial CFA Plot Edge Labels:")
+print(initial_labels)
+
+print("Bootstrapped CFA Plot Edge Labels with 95% CI:")
+print(boot_labels)
+
+# Display the updated plot
+qgraph::qgraph(boot_cfa_plot)
 
 
 ```
