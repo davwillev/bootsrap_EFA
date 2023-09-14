@@ -42,7 +42,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 # Set file path
-path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/7-item_ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-08-31_1142.csv"
+path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/6-item_ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-08-31_1142.csv"
 
 # Import data from csv
 data <- read_csv(path)
@@ -64,7 +64,7 @@ seed <- 1234
 set.seed(seed)
 
 # Set number of bootstrap iterations
-boot_iterations <- 100 # Set to 1000 or more
+boot_iterations <- 5000 # Set to 1000 or more
 
 # Minimum number of subjects per item for EFA
 min_subjects_item <- 20
@@ -994,7 +994,7 @@ T_orig <- fitMeasures(initial_cfa_model, "chisq")
 df_orig <- fitMeasures(initial_cfa_model, "df")
 
 # Compute a bootstrap based p-value for chi-square
-pvalue_boot <- length(which(boot_measures$chisq > T_orig)) / length(boot_measures$chisq)
+pvalue_boot <- length(which(boot_measures$fit_chis > T_orig)) / length(boot_measures$fit_chis)
 
 # Capture the final output
 final_output <- capture.output({
