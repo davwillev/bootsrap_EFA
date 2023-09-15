@@ -72,6 +72,7 @@ min_subjects_item <- 20
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Assess missing data
 
 ```{r}
 
@@ -414,7 +415,7 @@ print(paste("The number of factors to be retained for the EFA is", nfactors))
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Define functions
+## Define functions to perform bootstrap EFA
 
 ```{r}
 
@@ -503,6 +504,12 @@ run_bootstrap_efa <- function(efa_data, questionnaire_vars, boot_iterations, nfa
   }
   return(list(rotated = results_list_rotated, unrotated = results_list_unrotated))
 }
+
+```
+
+## Functions for summarising bootstrap EFA
+
+```{r}
 
 # Function returning summary of factor loadings from bootstrap EFA
 loadings_summary <- function(bootstrap_results, nfactors) {
@@ -618,9 +625,7 @@ communalities_summary <- function(loadings_list) {
   return(summarized_metrics)
 }
 
-knitr::opts_chunk$set(echo = TRUE)
 ```
-
 
 ## Run initial EFA
 
