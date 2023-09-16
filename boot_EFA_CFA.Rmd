@@ -461,48 +461,56 @@ efa_func <- function(data, indices, nfactors, initial_efa) {
   
   if (is.null(bootstrap_efa)) return(list(rotated = NULL, unrotated = NULL))
   
-  # Remove NA rows from loadings matrix before converting to data frame
   bootstrap_efa$loadings <- bootstrap_efa$loadings[rowSums(is.na(bootstrap_efa$loadings)) != ncol(bootstrap_efa$loadings), ]
   
   unrotated_loadings_df <- as.data.frame(bootstrap_efa$loadings)
   unrotated_loadings_df$item <- colnames(data)
-  #print("Iteration loadings after EFA")
-  #print(unrotated_loadings_df)
   
   if(nfactors == 1) {
     loadings_df <- as.data.frame(bootstrap_efa$loadings)
-    #print("Iteration final loadings")
   } else {
     rotated_loadings <- procrustes_rotate_loadings(bootstrap_efa, initial_efa)
     if (is.null(rotated_loadings)) return(list(rotated = NULL, unrotated = unrotated_loadings_df))
     
     loadings_df <- as.data.frame(rotated_loadings)
-    #print("Iteration final loadings after Procrustes rotation")
   }
   loadings_df$item <- colnames(data)
-  #print(loadings_df)
   
-  return(list(rotated = loadings_df, unrotated = unrotated_loadings_df))
+  # Compute residuals
+  observed_matrix <- cor(bootstrap_data)
+
+  loadings_matrix <- bootstrap_efa$loadings
+  
+  estimated_matrix <- loadings_matrix %*% t(loadings_matrix) + diag(bootstrap_efa$uniquenesses)
+  
+  residuals_matrix <- observed_matrix - estimated_matrix
+  
+  return(list(rotated = loadings_df, unrotated = unrotated_loadings_df, residuals = residuals_matrix))
 }
 
 # Function to perform EFA on bootstrapped sample
 run_bootstrap_efa <- function(efa_data, questionnaire_vars, boot_iterations, nfactors, initial_efa) {
-  results_list_rotated <- vector("list", boot_iterations)
   results_list_unrotated <- vector("list", boot_iterations)
+  results_list_rotated <- vector("list", boot_iterations)
+  residuals_list <- vector("list", boot_iterations)
   
   for (i in 1:boot_iterations) {
-    #print(paste("Bootstrap EFA iteration", i))
-    
     result <- efa_func(efa_data[, questionnaire_vars], sample(1:nrow(efa_data), replace = TRUE), nfactors, initial_efa)
     
-    if (!is.null(result$rotated)) {
-      results_list_rotated[[i]] <- result$rotated
-    }
+    # Store unrotated factor loadings
     if (!is.null(result$unrotated)) {
       results_list_unrotated[[i]] <- result$unrotated
     }
+    # Store rotated factor loadings
+    if (!is.null(result$rotated)) {
+      results_list_rotated[[i]] <- result$rotated
+    }
+    # Store residuals
+    if (!is.null(result$residuals)) {
+      residuals_list[[i]] <- result$residuals
+    }
   }
-  return(list(rotated = results_list_rotated, unrotated = results_list_unrotated))
+  return(list(rotated = results_list_rotated, unrotated = results_list_unrotated, residuals = residuals_list))
 }
 
 ```
@@ -625,6 +633,48 @@ communalities_summary <- function(loadings_list) {
   return(summarized_metrics)
 }
 
+# Function returning summary of standardised residuals from bootstrap EFA
+residuals_summary <- function(residuals_list) {
+  # Number of items (assuming square matrices for residuals)
+  p <- dim(residuals_list[[1]])[1]
+  
+  # Extract item labels from the first residuals matrix
+  item_labels <- rownames(residuals_list[[1]])
+  
+  # Initialise matrices to store the diagonal and off-diagonal residuals for each bootstrap sample
+  diagonal_residuals <- matrix(0, nrow=length(residuals_list), ncol=p)
+  off_diagonal_residuals <- matrix(0, nrow=length(residuals_list), ncol=p)
+  
+  # Extract diagonal and off-diagonal residuals for each bootstrap sample
+  for(i in 1:length(residuals_list)) {
+    diagonal_residuals[i, ] <- diag(residuals_list[[i]])
+    off_diagonal_residuals[i, ] <- rowMeans(abs(residuals_list[[i]])) - abs(diag(residuals_list[[i]]))
+  }
+  
+  # Compute mean and 95% CIs for diagonal residuals
+  mean_diag <- colMeans(diagonal_residuals)
+  ci_lower_diag <- apply(diagonal_residuals, 2, function(x) quantile(x, 0.025))
+  ci_upper_diag <- apply(diagonal_residuals, 2, function(x) quantile(x, 0.975))
+  
+  # Compute mean and 95% CIs for off-diagonal residuals
+  mean_off_diag <- colMeans(off_diagonal_residuals)
+  ci_lower_off_diag <- apply(off_diagonal_residuals, 2, function(x) quantile(x, 0.025))
+  ci_upper_off_diag <- apply(off_diagonal_residuals, 2, function(x) quantile(x, 0.975))
+  
+  # Combine results into a data frame
+  summary_df <- data.frame(
+    item = item_labels,
+    mean_diag_residual = mean_diag,
+    ci_lower_diag = ci_lower_diag,
+    ci_upper_diag = ci_upper_diag,
+    mean_off_diag_residual = mean_off_diag,
+    ci_lower_off_diag = ci_lower_off_diag,
+    ci_upper_off_diag = ci_upper_off_diag
+  )
+  
+  return(summary_df)
+}
+
 ```
 
 ## Run initial EFA
@@ -660,7 +710,7 @@ if(is.null(initial_efa)){
   # Collect bootstrap EFA results
   bootstrap_results <- run_bootstrap_efa(efa_data, questionnaire_vars, boot_iterations, nfactors, initial_efa)
   
-  # Print summary
+  # Print loadings summary
   loadings_summary_unrotated <- format_loadings(loadings_summary(bootstrap_results$unrotated, nfactors))
   
   # Save summary to a CSV file
@@ -696,17 +746,25 @@ if(is.null(initial_efa)){
   
   communalities_summary_rotated <- communalities_summary(bootstrap_results$rotated)
   
-  # Save summary
+  # Print communalities summary
   print("Communalities summary after Procrustes rotations:")
   print(communalities_summary_rotated)
   
-  # Save to a CSV fikle
+  # Save summary to a CSV file
   write.csv(communalities_summary_rotated, "Communalities.csv", row.names = FALSE)
   
   # Interpretation:
   # Communalities reflect how well each item is represented by the factors. Items with low communalities might not fit well with the chosen factor structure.
 
-knitr::opts_chunk$set(echo = TRUE)
+  summarized_residuals <- residuals_summary(bootstrap_results$residuals)
+
+  # Print residuals summary
+  print("Summary of standardised residuals:")
+  print(summarized_residuals)
+  
+  # Save summary to a CSV file
+  write.csv(summarized_residuals, "Residuals.csv", row.names = FALSE)
+
 ```
 
 ```{r}
