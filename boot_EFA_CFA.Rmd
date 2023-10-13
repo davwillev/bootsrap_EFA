@@ -87,17 +87,20 @@ calc_missing_values <- function(dataset, vars) {
   sum(is.na(dataset[, vars]))
 }
 
+# Initialize an empty character vector to hold all the statements
+miss_data_statements <- c()
+
 # Initial count of rows
 initial_row_count <- nrow(data)
-cat("Total number of rows at beginning:", initial_row_count, "\n")
+miss_data_statements <- c(miss_data_statements, sprintf("Total number of rows at beginning: %d", initial_row_count))
 
 # Initial count of missing values
 total_missing_values <- calc_missing_values(data, questionnaire_vars)
-cat("Total missing values before cleaning:", total_missing_values, "\n")
+miss_data_statements <- c(miss_data_statements, sprintf("Total missing values before cleaning: %d", total_missing_values))
 
 # Count rows where all questionnaire items are NA
 all_missing_rows <- sum(rowSums(is.na(data[, questionnaire_vars])) == length(questionnaire_vars))
-cat("Number of rows with all values missing:", all_missing_rows, "\n")
+miss_data_statements <- c(miss_data_statements, sprintf("Number of rows with all values missing: %d", all_missing_rows))
 
 # Remove rows in which all values are NA
 data <- data %>%
@@ -105,7 +108,7 @@ data <- data %>%
 
 # Count the number of remaining rows after removing those with all items missing
 remaining_rows_after_all_na_removal <- nrow(data)
-cat("Number of rows after removing those with all values missing:", remaining_rows_after_all_na_removal, "\n")
+miss_data_statements <- c(miss_data_statements, sprintf("Number of rows after removing those with all values missing: %d", remaining_rows_after_all_na_removal))
 
 # Perform Little's Missing Completely At Random test
 mcar_result <- naniar::mcar_test(data[, questionnaire_vars])
@@ -115,8 +118,14 @@ mcar_p_value <- mcar_result$p.value
 missing_patterns <- mcar_result$missing.patterns
 mcar_statement <- sprintf("Little's MCAR test yielded a chi-squared statistic of %.2f with %d degrees of freedom, resulting in a p-value of %.3f. The data contains %d unique missing data patterns.", 
                             mcar_statistic, mcar_df, mcar_p_value, missing_patterns)
+miss_data_statements <- c(miss_data_statements, mcar_statement)
 
-print(mcar_statement)
+# Combine all statements into a single string, separated by newlines
+miss_data_output <- paste(miss_data_statements, collapse = "\n")
+
+# Print and save the final output to a text file
+print(miss_data_output)
+writeLines(miss_data_output, file.path(path, "Missing_data.txt"))
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
