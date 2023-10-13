@@ -42,9 +42,9 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 # Set file path
-path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/G-TSK development/Data/"
+path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/G-TSK development/Data/Reverse_scored/"
 
-data_file <- "ADLInterferenceAndAt-GTSK_DATA_2023-10-13_1447.csv"
+data_file <- "reversed_ADLInterferenceAndAt-GTSK_DATA_2023-10-13_1447.csv"
 
 # Combine path and file name
 full_path <- file.path(path, data_file)
@@ -70,7 +70,7 @@ seed <- 1234
 set.seed(seed)
 
 # Set number of bootstrap iterations
-boot_iterations <- 100 # Set to 1000 or more
+boot_iterations <- 1000 # Set to 1000 or more
 
 # Minimum number of subjects per item for EFA
 min_subjects_item <- 20
@@ -169,7 +169,8 @@ plot_response_distribution <- function(data, columns, plot_title, save_path) {
   
   # Print and save the plot
   print(p)
-  ggsave(save_path, plot = p, width = 10, height = 8)
+  full_save_path <- file.path(path, save_path)
+  ggsave(full_save_path, plot = p, width = 10, height = 8)
 }
 
 # Plot response distribution
@@ -408,7 +409,9 @@ boot_scree <- ggplot(plot_eigen, aes(x = eigenvalue_index, y = mean_eigenvalue))
   scale_x_continuous(breaks = seq(min(plot_eigen$eigenvalue_index), max(plot_eigen$eigenvalue_index), by = 1)) + # Force x-axis intervals to be integers
   theme_minimal()
 
-ggsave("boot_scree.pdf", boot_scree, width = 11.69, height = 8.27) # Save to PDF (A4)
+scree_save_path <- file.path(path, "boot_scree.pdf")
+ggsave(scree_save_path, plot = boot_scree, width = 11.69, height = 8.27)  # Save to PDF (A4)
+
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -439,7 +442,8 @@ p4 <- plot_histogram(boot_nfactors_eigen, "Eigenvalues > 1", "D")
 grid <- arrangeGrob(p1, p2, p3, p4, ncol=2)
 grid.draw(grid)
 
-ggsave("nfactors_hist.pdf", grid, width = 11.69, height = 8.27) # Save to PDF (A4)
+hist_save_path <- file.path(path, "nfactors_hist.pdf")
+ggsave(hist_save_path, plot = grid, width = 11.69, height = 8.27)  # Save to PDF (A4)
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -776,7 +780,9 @@ if(is.null(initial_efa)){
   loadings_summary_unrotated <- format_loadings(loadings_summary(bootstrap_results$unrotated, nfactors))
   
   # Save summary to a CSV file
-  write.csv(loadings_summary_unrotated, "Loadings_before_Procrustes.csv", row.names = FALSE)
+  before_procrustes_save_path <- file.path(path, "Loadings_before_Procrustes.csv")
+  write.csv(loadings_summary_unrotated, before_procrustes_save_path, row.names = FALSE)
+
   
   # Interpretation: 
   # Examine the loadings to see which items consistently load onto specific factors. Items with loadings close to 0 may not fit well with any factor.
@@ -789,7 +795,9 @@ if(is.null(initial_efa)){
   print(formatted_loadings_summary_rotated)
   
   # Save summary to a CSV file
-  write.csv(formatted_loadings_summary_rotated, "Loadings_after_Procrustes.csv", row.names = FALSE)
+  after_procrustes_save_path <- file.path(path, "Loadings_after_Procrustes.csv")
+  write.csv(formatted_loadings_summary_rotated, after_procrustes_save_path, row.names = FALSE)
+
 
   # Interpretation:
   # Procrustes rotations help align the loadings of bootstrap EFAs with the initial EFA. Check if the rotated loadings offer clearer insights into the factor structure.
@@ -801,7 +809,9 @@ if(is.null(initial_efa)){
   print(variance_results)
   
   # Save summary to a CSV file
-  write.csv(variance_results, "Explained_variance.csv", row.names = FALSE)
+  variance_save_path <- file.path(path, "Explained_variance.csv")
+  write.csv(variance_results, variance_save_path, row.names = FALSE)
+
 
   # Interpretation:
   # Factors that explain a higher proportion of the variance are generally more significant. Factors explaining very little variance may be less informative or redundant.
@@ -813,7 +823,9 @@ if(is.null(initial_efa)){
   print(communalities_summary_rotated)
   
   # Save summary to a CSV file
-  write.csv(communalities_summary_rotated, "Communalities.csv", row.names = FALSE)
+  variance_save_path <- file.path(path, "Communalities.csv")
+  write.csv(communalities_summary_rotated, variance_save_path, row.names = FALSE)
+
   
   # Interpretation:
   # Communalities reflect how well each item is represented by the factors. Items with low communalities might not fit well with the chosen factor structure.
@@ -825,7 +837,8 @@ if(is.null(initial_efa)){
   print(summarized_residuals)
   
   # Save summary to a CSV file
-  write.csv(summarized_residuals, "Residuals.csv", row.names = FALSE)
+  residuals_save_path <- file.path(path, "Residuals.csv")
+  write.csv(summarized_residuals, residuals_save_path, row.names = FALSE)
 
 ```
 
