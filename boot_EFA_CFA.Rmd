@@ -42,10 +42,15 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 # Set file path
-path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/Disability attribution/Analyses/Factor analysis/6-item_ADLInterferenceAndAt-UniversalDisabilityI_DATA_2023-08-31_1142.csv"
+path <- "/Users/davidevans/Library/CloudStorage/OneDrive-Personal/My Projects/UBham/G-TSK development/Data/"
+
+data_file <- "ADLInterferenceAndAt-GTSK_DATA_2023-10-13_1447.csv"
+
+# Combine path and file name
+full_path <- file.path(path, data_file)
 
 # Import data from csv
-data <- read_csv(path)
+data <- read_csv(full_path)
 
 # Get questionnaire variables (retain all variables except 'record_id')
 questionnaire_vars <- names(data)[!(names(data) %in% "record_id")]
@@ -57,6 +62,7 @@ print(paste("There are", num_vars, "variables (items) in this dataset"))
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+
 ```{r}
 
 # Set seed
@@ -64,7 +70,7 @@ seed <- 1234
 set.seed(seed)
 
 # Set number of bootstrap iterations
-boot_iterations <- 5000 # Set to 1000 or more
+boot_iterations <- 100 # Set to 1000 or more
 
 # Minimum number of subjects per item for EFA
 min_subjects_item <- 20
@@ -113,6 +119,62 @@ mcar_statement <- sprintf("Little's MCAR test yielded a chi-squared statistic of
 print(mcar_statement)
 
 knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Visualise missing values
+
+```{r}
+
+# Function to visualize and save item response distributions
+plot_response_distribution <- function(data, columns, plot_title, save_path) {
+  
+  # Convert data to long format and convert NA to "Missing"
+  long_data <- data %>%
+    tidyr::pivot_longer(cols = columns, names_to = "item", values_to = "response") %>%
+    mutate(
+      response = ifelse(is.na(response), "Missing", as.character(response)),
+      item = factor(item, levels = columns)  # Set the levels of item factor to the order of columns
+    )
+  
+  # Calculate the total number of non-missing responses for each item
+  total_non_missing <- long_data %>%
+    group_by(item) %>%
+    summarise(total = sum(response != "Missing", na.rm = TRUE))
+  
+  # Calculate counts
+  long_data <- long_data %>%
+    group_by(item, response) %>%
+    summarise(count = n()) %>%
+    left_join(total_non_missing, by = "item") %>%
+    mutate(proportion = count / total)
+  
+  # Compute a suitable y-axis limit
+  y_max <- max(long_data$count) * 1.1
+  
+  # Define colors for each response category
+  response_colors <- scales::brewer_pal(palette = "Set2")(length(unique(long_data$response)))
+  names(response_colors) <- unique(long_data$response)
+  
+  # Create bar plots
+  p <- ggplot(long_data, aes(x = response, y = count, fill = response)) +
+    geom_bar(stat = "identity") +
+    scale_fill_manual(values = response_colors, name = "Response") +
+    geom_text(aes(label = count), position = position_stack(vjust = 0.5), color = "black") +
+    geom_text(data = subset(long_data, response != "Missing"), aes(label = scales::percent(proportion, accuracy = 0.1), y = count), vjust = -0.5, color = "black") +
+    facet_wrap(~item, scales = "free_x") +
+    labs(title = plot_title) +
+    ylab("Count") +
+    ylim(0, y_max) +
+    theme_minimal()
+  
+  # Print and save the plot
+  print(p)
+  ggsave(save_path, plot = p, width = 10, height = 8)
+}
+
+# Plot response distribution
+plot_response_distribution(data, questionnaire_vars, "Response Distribution Before Imputation", "response_distribution_before_imputation.png")
+
 ```
 
 ### Impute missing values
@@ -183,7 +245,7 @@ formatted_alpha_output <- format_alpha_output(alpha, questionnaire_vars)
 alpha_output_with_title <- c("Chronbach's alpha for whole dataset:", "", formatted_alpha_output)
 
 # Save the formatted output with title to a text file
-writeLines(alpha_output_with_title, "Chronbachs_Alpha_Whole_Dataset.txt")
+writeLines(alpha_output_with_title, file.path(path, "Chronbachs_Alpha_Whole_Dataset.txt"))
 
 # Capture output of the Chronbach's alpha and add title
 alpha_output <- capture.output(print(alpha))
@@ -191,7 +253,7 @@ alpha_output_with_title <- c("Chronbach's alpha for whole dataset:", "", alpha_o
 
 # Print and save captured output to a text file
 print(alpha_output_with_title)
-writeLines(alpha_output_with_title, "Chronbachs_Alpha_other.txt")
+writeLines(alpha_output_with_title, file.path(path, "Chronbachs_Alpha_other.txt"))
 
 ```
 
@@ -694,7 +756,7 @@ if(is.null(initial_efa)){
 
   # Print and save captured output with title to a text file
   print(efa_output_with_title)
-  writeLines(efa_output_with_title, "Initial_EFA.txt")
+  writeLines(efa_output_with_title, file.path(path, "Initial_EFA.txt"))
 
   # Interpretation: 
   # Ideally, the initial EFA should provide insights into the factor structure. Check if specific items load strongly onto particular factors.
@@ -766,6 +828,7 @@ if(is.null(initial_efa)){
   write.csv(summarized_residuals, "Residuals.csv", row.names = FALSE)
 
 ```
+
 
 ```{r}
 
@@ -928,6 +991,7 @@ if(length(multiple_criteria_items) > 0) {
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+
 ```{r}
 
 # Create final list of items to remove
@@ -1075,7 +1139,7 @@ final_output <- capture.output({
 })
 
 # Save captured output to a text file
-writeLines(final_output, "CFA_Summary.txt")
+writeLines(final_output, file.path(path, "CFA_Summary.txt"))
 
 ```
 
